@@ -1,0 +1,150 @@
+body {
+    font-family: 'Arial', sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #71a9f25f;
+    color: #333;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+header {
+    background: #3a8dd8;
+    color: #ffffff;
+    padding: 30px 0;
+    text-align: center;
+}
+
+.logo-bg {
+    background-color: rgba(255, 255, 255, 0.852);
+    padding: 10px;
+    border-radius: 12px;
+    display: inline-block;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.logo img {
+    filter: drop-shadow(2px 2px 6px rgba(0, 0, 0, 0.7));
+    width: 250px;
+    border-radius: 5px;
+}
+
+nav ul {
+    list-style: none;
+    padding: 0;
+}
+
+nav ul li {
+    display: inline;
+    margin: 0 15px;
+}
+
+nav ul li a {
+    color: #f8f8f8;
+    text-decoration: none;
+    font-weight: bold;
+    transition: color 0.3s;
+}
+
+nav ul li a:hover {
+    color: #0000ff;
+}
+
+main {
+    padding: 20px;
+}
+
+section {
+    padding: 60px 20px;
+    margin-bottom: 40px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.07);
+}
+
+#sobre {
+    background-color: #ffffff;
+}
+
+#personagens {
+    background-color: #f3f7ff;
+}
+
+#regras {
+    background-color: #eaf3fa;
+}
+
+h2 {
+    color: #0963acd1;
+    border-bottom: 2px solid #0963acd1;
+    padding-bottom: 5px;
+}
+
+.personagem {
+    background: #ffffff;
+    border: 1px solid #000000;
+    margin: 10px 0;
+    padding: 15px;
+    border-radius: 10px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s;
+    display: flex;
+    align-items: center;
+}
+
+.personagem img {
+    width: 100px;
+    height: auto;
+    margin-right: 15px;
+    border-radius: 5px;
+}
+
+.personagem:hover {
+    transform: scale(1.02);
+}
+
+footer {
+    text-align: center;
+    padding: 10px 0;
+    background: #0963acd1;
+    color: #fff;
+    bottom: 0;
+    width: 100%;
+}
+
+@media (max-width: 600px) {
+    nav ul li {
+        display: block;
+        margin: 10px 0;
+    }
+
+    .personagem {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .personagem img {
+        margin-bottom: 10px;
+    }
+}
+
+button:focus {
+    outline: 2px solid #3b5cff;
+    outline-offset: 1px;
+}
+
+#lore {
+    background-color: #dbe9f9;
+    color: #1a1a1a;
+    padding: 60px 20px;
+    margin-bottom: 40px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.07);
+}
+
+#lore h2 {
+    color: #0963acd1;
+    border-bottom: 2px solid #0963acd1;
+    padding-bottom: 5px;
+}
