@@ -1,0 +1,33 @@
+#include <Arduino.h>
+
+const int LDR_PIN = 2;
+const int sensor = 4; // Pino D4 conectado ao sensor KY-037
+
+void setup()
+{
+  Serial.begin(9600);
+  pinMode(sensor, INPUT);
+}
+
+void loop()
+{
+  int ldrValue = analogRead(LDR_PIN);
+  
+  float voltage = ldrValue * (3.3 / 4095.0); //CONVERTE A VOLTAGEM PARA 3v3
+  
+  Serial.print("LDR Value: ");
+  Serial.print(ldrValue);
+  Serial.print(" | Voltage: ");
+  Serial.println(voltage);
+  
+  delay(500);
+
+
+
+  if (digitalRead(sensor) == HIGH)
+  {
+     Serial.println("Voce Perdeu 1 Moeda");
+    
+  }
+
+}
