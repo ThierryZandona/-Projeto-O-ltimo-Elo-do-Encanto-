@@ -1,12 +1,11 @@
 #include <Arduino.h>
 
 const int LDR_PIN = 2;
-const int sensor = 4; // Pino D4 conectado ao sensor KY-037
 
 void setup()
 {
   Serial.begin(9600);
-  pinMode(sensor, INPUT);
+  
 }
 
 void loop()
@@ -22,14 +21,5 @@ if (ldrValue > 1200)
   delay(500);
 }
 
-  
-
-  if (digitalRead(sensor) == HIGH)
-  {
-     Serial.println("RUIDO DETECTADO!!");
-     Serial.println("Passa a Moeda OTARIO!");
-     Serial.println("---------------------------");
-    
-  }
 
 }
