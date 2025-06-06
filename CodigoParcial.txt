@@ -14,19 +14,21 @@ void loop()
   int ldrValue = analogRead(LDR_PIN);
   
   float voltage = ldrValue * (3.3 / 4095.0); //CONVERTE A VOLTAGEM PARA 3v3
-  
-  Serial.print("LDR Value: ");
-  Serial.print(ldrValue);
-  Serial.print(" | Voltage: ");
-  Serial.println(voltage);
-  
+
+if (ldrValue > 1200)
+{
+  Serial.println("Voce Perdeu 1 Moeda");
+  Serial.println("---------------------------");
   delay(500);
+}
 
-
+  
 
   if (digitalRead(sensor) == HIGH)
   {
-     Serial.println("Voce Perdeu 1 Moeda");
+     Serial.println("RUIDO DETECTADO!!");
+     Serial.println("Passa a Moeda OTARIO!");
+     Serial.println("---------------------------");
     
   }
 
