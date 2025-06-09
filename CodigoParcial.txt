@@ -1,25 +1,70 @@
 #include <Arduino.h>
+#include <Bounce2.h>
 
 const int LDR_PIN = 2;
 
-void setup()
-{
+const int a_button = 14;
+const int b_button = 12;
+const int c_button = 27;
+const int d_button = 13;
+
+
+Bounce btnA = Bounce();
+Bounce btnB = Bounce();
+Bounce btnC = Bounce();
+Bounce btnD = Bounce();
+
+unsigned long UltimaAtualizacaoMoeda = 0;
+const unsigned long IntervaloMoeda = 500;
+
+void setup() {
   Serial.begin(9600);
+
   
+  pinMode(a_button, INPUT_PULLUP);
+  pinMode(b_button, INPUT_PULLUP);
+  pinMode(c_button, INPUT_PULLUP);
+  pinMode(d_button, INPUT_PULLUP);
+
+  
+  btnA.attach(a_button);
+  btnB.attach(b_button);
+  btnC.attach(c_button);
+  btnD.attach(d_button);
+
+  
+  btnA.interval(25);
+  btnB.interval(25);
+  btnC.interval(25);
+  btnD.interval(25);
 }
 
-void loop()
-{
+void loop() {
+  btnA.update();
+  btnB.update();
+  btnC.update();
+  btnD.update();
+
   int ldrValue = analogRead(LDR_PIN);
+  float voltage = ldrValue * (3.3 / 4095.0);
+
   
-  float voltage = ldrValue * (3.3 / 4095.0); //CONVERTE A VOLTAGEM PARA 3v3
+  if (ldrValue > 1200 && millis() - UltimaAtualizacaoMoeda > IntervaloMoeda) {
+    Serial.println("Você Perdeu 1 Moeda");
+    Serial.println("---------------------------");
+    UltimaAtualizacaoMoeda = millis();
+  }
 
-if (ldrValue > 1200)
-{
-  Serial.println("Voce Perdeu 1 Moeda");
-  Serial.println("---------------------------");
-  delay(500);
-}
-
-
+  if (btnA.fell()) {
+    Serial.println("Botão A pressionado");
+  }
+  if (btnB.fell()) {
+    Serial.println("Botão B pressionado");
+  }
+  if (btnC.fell()) {
+    Serial.println("Botão C pressionado");
+  }
+  if (btnD.fell()) {
+    Serial.println("Botão D pressionado");
+  }
 }
