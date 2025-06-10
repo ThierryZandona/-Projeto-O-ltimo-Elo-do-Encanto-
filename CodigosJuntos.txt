@@ -12,7 +12,7 @@ void sortearCartas();
 const char* LendaNome(int codigo);
 
 // === Pinos ===
-const int pinoLDR = 32;
+const int pinoLDR = 2;
 const int botaoSelecionar = 14;
 const int botaoVoltar = 12;
 const int botaoC = 27;
@@ -50,7 +50,7 @@ int UltimaDirecaoY = 0;
 int moedas = 2;
 
 // === Tempo da mecânica LDR ===
-const unsigned long intervaloMoeda = 500;
+const unsigned long intervaloMoeda = 1000;
 unsigned long ultimaAtualizacaoMoeda = 0;
 
 // === Ícone personalizado ===
@@ -76,7 +76,7 @@ const char *obterDescricaoAcao(int acao)
   switch (acao)
   {
   case 1:
-    return "COLETA 3 MOEDAS";
+    return "PEGUE 3 MOEDAS";
   case 2:
     return "ROUBA 2 MOEDAS ";
   case 3:
@@ -189,18 +189,19 @@ void exibirItemMenu()
 {
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Menu de Acoes:");
+  lcd.print("ACOES:");
   lcd.setCursor(1, 1);
   lcd.print(" >");
-  lcd.setCursor(3, 1);
+  lcd.setCursor(6, 0);
   lcd.print(obterDescricaoAcao(indiceMenu + 1));
-  lcd.setCursor(0, 2);
-  lcd.print("C1:");
+  lcd.setCursor(0, 1);
+  lcd.print("C1: ");
   lcd.print(LendaNome(lenda1));
-  lcd.print(" C2:");
+  lcd.setCursor(0, 2);
+  lcd.print("C2: ");
   lcd.print(LendaNome(lenda2));
   lcd.setCursor(0, 3);
-  lcd.print("Moedas: ");
+  lcd.print("Moedas:");
   lcd.print(moedas);
   lcd.write(byte(0));
 }
@@ -241,7 +242,7 @@ void atualizarBotoes()
     {
       lcd.clear();
       lcd.setCursor(0, 1);
-      lcd.print("acao selecionada:");
+      lcd.print("ACAO SELECIONADA:");
       lcd.setCursor(0, 2);
       lcd.print(obterDescricaoAcao(indiceMenu + 1));
       delay(3000);
@@ -318,12 +319,11 @@ void verificarLDR()
   int leituraLDR = analogRead(pinoLDR);
   unsigned long agora = millis();
 
-  // if (leituraLDR > 1200 && agora - ultimaAtualizacaoMoeda > intervaloMoeda)
+  // if (leituraLDR > 1500 && agora - ultimaAtualizacaoMoeda > intervaloMoeda)
   // {
   //   moedas = max(0, moedas - 1);
   //   lcd.setCursor(0, 3);
   //   lcd.print("Perdeu 1 moeda! ");
-  //   delay(1000);
   //   exibirItemMenu();
   //   ultimaAtualizacaoMoeda = agora;
   // }
