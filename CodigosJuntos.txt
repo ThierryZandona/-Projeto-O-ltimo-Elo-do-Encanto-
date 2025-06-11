@@ -12,7 +12,7 @@ void sortearCartas();
 const char* LendaNome(int codigo);
 
 // === Pinos ===
-const int pinoLDR = 2;
+const int pinoLDR = 33;
 const int botaoSelecionar = 14;
 const int botaoVoltar = 12;
 const int botaoC = 27;
@@ -49,20 +49,22 @@ int UltimaDirecaoY = 0;
 // === Estado do jogo ===
 int moedas = 2;
 
-// === Tempo da mecânica LDR ===
+// === Tempo ===
 const unsigned long intervaloMoeda = 1000;
 unsigned long ultimaAtualizacaoMoeda = 0;
+ 
 
 // === Ícone personalizado ===
 byte moedaChar[8] = {
-    B00100,
-    B01110,
-    B11111,
-    B11011,
-    B11111,
-    B01110,
-    B00100,
-    B00000};
+    0b01110, //  *** 
+  0b11111, // *****
+  0b10001, // *   *
+  0b10101, // * * *
+  0b10101, // * * *
+  0b10001, // *   *
+  0b11111, // *****
+  0b01110  //  *** 
+};
 
 // === Cartas sorteadas ===
 int lenda1 = -1;
@@ -209,6 +211,7 @@ void exibirItemMenu()
 // === Loop principal ===
 void loop()
 {
+  
   if (!cartasSorteadas)
   {
     sortearCartas();
@@ -220,7 +223,7 @@ void loop()
   verificarLDR();
 }
 
-// === Atualizar botões ===
+
 void atualizarBotoes()
 {
   btnSelecionar.update();
@@ -314,17 +317,18 @@ else if (dirY == 0)
 }
 
 // === Verificar sensor LDR para diminuir moedas ===
-void verificarLDR()
-{
-  int leituraLDR = analogRead(pinoLDR);
+void verificarLDR() {
+  int leituraLDR = analogRead(pinoLDR); 
+  Serial.println(leituraLDR); 
   unsigned long agora = millis();
 
-  // if (leituraLDR > 1500 && agora - ultimaAtualizacaoMoeda > intervaloMoeda)
-  // {
-  //   moedas = max(0, moedas - 1);
-  //   lcd.setCursor(0, 3);
-  //   lcd.print("Perdeu 1 moeda! ");
-  //   exibirItemMenu();
-  //   ultimaAtualizacaoMoeda = agora;
-  // }
+  if (btnC.fell()) {
+    if (leituraLDR > 2000 && agora - ultimaAtualizacaoMoeda > intervaloMoeda) {
+      moedas = max(0, moedas - 1);
+      lcd.setCursor(0, 3);
+      lcd.print("Perdeu 1 moeda! ");
+      exibirItemMenu();
+      ultimaAtualizacaoMoeda = agora;
+    }
+  }
 }
