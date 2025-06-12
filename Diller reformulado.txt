@@ -5,6 +5,9 @@
 #include <internet.h>
 #include <PubSubClient.h>
 
+#define MaxPlayers 4 // Define o número máximo de jogadores
+#define MaxCards 3 // Define o número máximo de cada carta
+
 WiFiClient espClient;
 PubSubClient client(espClient);
 
@@ -18,23 +21,26 @@ struct Game
 Game game;
 struct Players
 {
-  int playersCount = 0;         // Variável para armazenar o número de jogadores
-  bool playerEndturn = false;   // Variável para armazenar o estado do turno do jogador
-  bool playerHandCards = false; // Variável para armazenar o estado das cartas na mão do jogador
+  bool Endturn = false;   // Variável para armazenar o estado do turno do jogador
+  bool HandCards = false; // Variável para armazenar o estado das cartas na mão do jogador
+  bool Ready = false; // 
 };
-Players players;
+Players player[MaxPlayers]; // Cria um array de jogadores com o tamanho máximo definido
+
+int playersCount = 0; // Variável para armazenar o número de jogadores
+int IaraCount [3] = {0}; // Array para armazenar o número de cartas Iara
+int SaciCount [3] = {0}; // Variável para armazenar o número de cartas Saci
+int CurupiraCount [3] = {0}; // Variável para armazenar o número de cartas Boto
+
+
 
 const char *mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
 const char *mqtt_id = "esp32-senai225-Henrique";
-const char *mqtt_topic_sub = "senai134/Jogador1/esp_inscrito";
-const char *mqtt_topic_sub2 = "senai134/Jogador2/esp_inscrito";
-const char *mqtt_topic_pub = "senai134/Jogador1/esp_publicando";
-const char *mqtt_topic_pub2 = "senai134/Jogador2/esp_publicando";
-const char *mqtt_topic_pub3 = "senai134/Diller/esp_publicando";
 
-unsigned long tempoEspera = millis();        // Variável para armazenar o tempo de espera
-static unsigned long tempoUltimaConexao = 0; // Variável para armazenar o tempo da última conexão WiFi
+String mqtt_topic_subs[MaxPlayers];
+String mqtt_topic_pubs[MaxPlayers];
+
 
 void callback(char *, byte *, unsigned int);
 void mqttConnect(void);
@@ -48,9 +54,14 @@ void setup()
   conectaWiFi();                            // Conecta ao WiFi
   client.setServer(mqtt_server, mqtt_port); // Define o servidor MQTT e a porta
   client.setCallback(callback);             // Define a função de callback para receber mensagens MQTT
+  for(int i = 0; i < MaxPlayers; i++) {
+    mqtt_topic_subs[i] = String("senai134/Jogador") + (i + 1) + "/esp_inscrito"; // Define os tópicos de inscrição para cada jogador
+    mqtt_topic_pubs[i] = String("senai134/Jogador") + (i + 1) + "/esp_publicando"; // Define os tópicos de publicação para cada jogador
+  }
 }
 
 void loop()
+
 {
   mqttConnect(); // Conecta ao MQTT
   checkWiFi();    // Verifica a conexão WiFi
@@ -72,14 +83,30 @@ void callback(char *topic, byte *payload, unsigned int length)
   mensagem.trim();
   mensagem.toLowerCase();
 
-  if (mensagem == "ready")
+  for (int i = 0; i < MaxPlayers; i++) // Verifica se a mensagem é de algum dos tópicos de inscrição
   {
-    players.playersCount++; // Incrementa o número de jogadores quando recebe a mensagem "ready"
-    Serial.print("Jogadores prontos: ");
-    Serial.println(players.playersCount); // Exibe o número de jogadores prontos
+    if (String(topic) == mqtt_topic_subs[i])
+    {
+      if(!player[i].Ready)
+      {
+        player[i].Ready = true;
+      }
+     if(mensagem=="pronto" && player[i].Ready)
+     {
+        playersCount++; // Incrementa o número de jogadores quando recebe a mensagem "ready"
+        Serial.print("Jogadores prontos: ");
+        Serial.println(i+1);
+        
+     }
+     else
+     {
+       Serial.println("Erro na contagem de jogadores");
+     }
+     
+    }
   }
+  
 }
-
 void mqttConnect()
 {
   while (!client.connected())
@@ -89,8 +116,10 @@ void mqttConnect()
     if (client.connect(mqtt_id))
     {
       Serial.println("Conectado com sucesso");
-      client.subscribe(mqtt_topic_sub);
-      client.subscribe(mqtt_topic_sub2);
+     for (int i = 0; i < MaxPlayers; i++) 
+     {
+     client.subscribe(mqtt_topic_subs[i].c_str());
+    }
     }
     else
     {
@@ -104,83 +133,60 @@ void mqttConnect()
 
 void checkPlayers()
 {
-  if (players.playersCount >= 2) // Verifica se há pelo menos 2 jogadores
-  {
-    if (tempoEspera - tempoUltimaConexao > 2500)
-      Serial.println("Número de jogadores suficiente. Iniciando o jogo...");
-    game.gameStarted = true;
-  }
-  else if (tempoEspera - tempoUltimaConexao > 3000) // Se o número de jogadores for menor que 2 e o tempo de espera for maior que 3 segundos
-  {
+  unsigned long tempoEspera = millis();        // Variável para armazenar o tempo de espera
+  static unsigned long tempoUltimaConexao = 0; // Variável para armazenar o tempo da última conexão WiFi
 
-    Serial.println("Aguardando mais jogadores...");
-  }
-
-  if (game.gameStarted && players.playersCount == 2) // Se o jogo já começou e o turno do jogador terminou
+  if(playersCount>=2 && !game.gameStarted)
   {
-    players.playerHandCards = true;
-  }
+    Serial.println("Numero de jogadores suficiente, iniciando o jogo...");
+    game.gameStarted=true;
 
-  tempoUltimaConexao = tempoEspera; // Atualiza o tempo da última conexão
+    for(int i = 0; i<playersCount; i++)
+    {
+      player[i].HandCards=true;
+    }
+  }
+    else if (playersCount<2)
+    {
+      
+      {
+      Serial.println("Aguardando mais jogadores");
+      delay(3000);
+      }
+       
+    }
+  
 }
 
 void handCards()
 {
-  if (players.playerHandCards)
+  if (playersCount<2) 
+  return;
+  
+  
+  for(int i = 0; i<playersCount; i++)
   {
-    int numero = esp_random();
-
-    unsigned int jogador = random(1, 4);       // Gera um número aleatório para determinar o jogador que vai receber a carta
-    unsigned int jogador2 = random(1,4);      // Gera um número aleatório para determinar o segundo jogador que vai receber a carta
-
-    Serial.println("Jogador sorteado: ");
-    delay(1500);
-    Serial.println(jogador);
-    delay(3000); // Exibe o número do jogador sorteado
-    JsonDocument doc1;
-    JsonDocument doc2;
-
-    switch (jogador) // Verifica o número do jogador
+    int carta=random(1,4);  
+    const char* nomeCarta="";
+  for(int j = 0; j < 2; j++) // Distribui duas cartas para cada jogador
+   { switch(carta)
     {
-    case 1:
-      game.gamecardSaci = true;               // Ativa a carta Saci para o jogador 1
-      doc1["Carta 1"] = "Saci";               // Adiciona a carta Saci ao objeto JSON do jogador 1
-      client.publish(mqtt_topic_pub, "Saci"); // Publica a mensagem "Saci" no tópico do jogador 1
-      break;
-    case 2:
-      game.gamecardIara = true;               // Ativa a carta Iara para o jogador 1
-      doc1["Carta 1"] = "Iara";               // Adiciona a carta Iara ao objeto JSON do jogador 1
-      client.publish(mqtt_topic_pub, "Iara"); // Publica a mensagem "Iara" no tópico do jogador 1
-      break;
-    case 3:
-      game.gamecardBoto = true;               // Ativa a carta Boto para o jogador 1
-      doc1["Carta 1"] = "Boto";               // Adiciona a carta Boto ao objeto JSON do jogador 1
-      client.publish(mqtt_topic_pub, "Boto"); // Publica a mensagem "Boto" no tópico do jogador 1
-      break;
-
-    default:
-      break;
+      case 1:nomeCarta="Saci";break;
+      case 2:nomeCarta="Iara";break;
+      case 3:nomeCarta="Curupira";break;
     }
+   client.publish(mqtt_topic_pubs[i].c_str(), nomeCarta);   
+   Serial.print("Jogador ");
+   Serial.print(i+1);
+   Serial.print(" recebeu a carta ");
+   Serial.println(nomeCarta);
 
-    switch (jogador2) // Verifica o número do segundo jogador
-    {
-    case 1:
-      game.gamecardSaci = true;                // Ativa a carta Saci para o jogador 2
-      doc2["Carta 1"] = "Saci";                // Adiciona a carta Saci ao objeto JSON do jogador 2
-      client.publish(mqtt_topic_pub2, "Saci"); // Publica a mensagem "Saci" no tópico do jogador 2
-      break;
-    case 2:
-      game.gamecardIara = true;                // Ativa a carta Iara para o jogador 2
-      doc2["Carta 1"] = "Iara";                // Adiciona a carta Iara ao objeto JSON do jogador 2
-      client.publish(mqtt_topic_pub2, "Iara"); // Publica a mensagem "Iara" no tópico do jogador 2
-      break;
-    case 3:
-      game.gamecardBoto = true;                // Ativa a carta Boto para o jogador 2
-      doc2["Carta 1"] = "Boto";                // Adiciona a carta Boto ao objeto JSON do jogador 2
-      client.publish(mqtt_topic_pub2, "Boto"); // Publica a mensagem "Boto" no tópico do jogador 2
-      break;
-    default:
-      break;
-    }
+  }
+  
   }
 }
+
+
+
+//utilizar um for para nominar o numero de cartas de iara, curupira e saci
+// e depois utilizar um outro 
