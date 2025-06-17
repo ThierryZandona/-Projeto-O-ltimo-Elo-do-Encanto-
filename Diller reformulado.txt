@@ -5,52 +5,48 @@
 #include <internet.h>
 #include <PubSubClient.h>
 
-#define MaxPlayers 4 // Define o número máximo de jogadores
-#define MaxCards 3   // Define o número máximo de cada carta
+#define jogadoresMaximos 4 // Define o número máximo de jogadores
+#define cartasMaximas 3    // Define o número máximo de cada carta
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-struct Game
+struct Jogo
 {
-  bool gameStarted = false;  // Variável para armazenar o estado do jogo
-  bool gamecardBoto = false; // Variável para armazenar o estado da carta Boto
-  bool gamecardSaci = false; // Variável para armazenar o estado da carta Saci
-  bool gamecardIara = false; // Variável para armazenar o estado da carta Iara
+  bool jogoIniciado = false; // Variável para armazenar o estado do jogo
 };
-Game game;
+Jogo jogo;
 
-struct Players
+struct Jogadores
 {
-  bool Endturn = false;   // Variável para armazenar o estado do turno do jogador
   bool HandCards = false; // Variável para armazenar o estado das cartas na mão do jogador
   bool Ready = false;     //
 };
 
-Players player[MaxPlayers]; // Cria um array de jogadores com o tamanho máximo definido
+Jogadores listajogador[jogadoresMaximos]; // Cria um array de jogadores com o tamanho máximo definido
 
-int playersCount = 0; // Variável para armazenar o número de jogadores
+int contagemJogadores = 0; // Variável para armazenar o número de jogadores
 
 const char *mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
 const char *mqtt_id = "esp32-senai225-Henrique";
+const char *mqtt_topic_sub = "senai134/Diller/esp_inscrito";
+String mqtt_topic_subs[jogadoresMaximos];
+String mqtt_topic_pubs[jogadoresMaximos];
 
-String mqtt_topic_subs[MaxPlayers];
-String mqtt_topic_pubs[MaxPlayers];
-
-void callback(char *, byte *, unsigned int);
 void mqttConnect(void);
-void handCards(void);
-void checkPlayers(void);
+void numerojogadoresProntos(void);
+void distribuicaoCartas(void);
+void jogadoresProntos(void);
+void distribuicaoCartas(void);
+void eliminarCartas(char *topic, byte *payload, unsigned int length);
 
-void setup()
+void setup() // 
 {
-  Serial.begin(9600);
-
   conectaWiFi();                            // Conecta ao WiFi
   client.setServer(mqtt_server, mqtt_port); // Define o servidor MQTT e a porta
-  client.setCallback(callback);             // Define a função de callback para receber mensagens MQTT
-  for (int i = 0; i < MaxPlayers; i++)
+  client.setCallback(eliminarCartas);       // Define a função de callback para receber mensagens MQTT
+  for (int i = 0; i < jogadoresMaximos; i++)
   {
     mqtt_topic_subs[i] = String("senai134/Jogador") + (i + 1) + "/esp_inscrito";   // Define os tópicos de inscrição para cada jogador
     mqtt_topic_pubs[i] = String("senai134/Jogador") + (i + 1) + "/esp_publicando"; // Define os tópicos de publicação para cada jogador
@@ -60,48 +56,42 @@ void setup()
 void loop()
 
 {
-  mqttConnect();  // Conecta ao MQTT
-  checkWiFi();    // Verifica a conexão WiFi
-  client.loop();  // Mantém o loop do cliente MQTT ativo
-  checkPlayers(); // Verifica o número de jogadores e inicia o jogo se necessário
-  handCards();    // Verifica se o jogador pode comprar cartas e ativa as cartas correspondentes
+  mqttConnect();
+  checkWiFi();
+  client.loop();
+  jogadoresProntos();
 }
 
-void callback(char *topic, byte *payload, unsigned int length)
+void jogadoresProntos() // Verifica e adiciona os jogadore ao jogo por meio do monitor serial(Corrigir provavelmente)
 {
-
-  String mensagem = "";
-  for (unsigned int i = 0; i < length; i++)
+  Serial.begin(9600);
+  if (Serial.available())
   {
-    char c = (char)payload[i];
-    mensagem += c;
-  }
+    String mensagem = Serial.readStringUntil('\n');
+    mensagem.trim();
+    mensagem.toLowerCase();
 
-  mensagem.trim();
-  mensagem.toLowerCase();
-
-  for (int i = 0; i < MaxPlayers; i++) // Verifica se a mensagem é de algum dos tópicos de inscrição
-  {
-    if (String(topic) == mqtt_topic_subs[i])
+    if (mensagem == "numero de jogadores")
     {
-      if (!player[i].Ready)
+      int tamanho = mensagem.length();
+      String extration = mensagem.substring(18, tamanho); // Extrai o número de jogadores da mensagem
+      contagemJogadores = extration.toInt();
+
+      if (contagemJogadores < jogadoresMaximos)
       {
-        player[i].Ready = true;
-      }
-      if (mensagem == "pronto" && player[i].Ready)
-      {
-        playersCount++; // Incrementa o número de jogadores quando recebe a mensagem "ready"
+        listajogador[contagemJogadores].Ready = true;
         Serial.print("Jogadores prontos: ");
-        Serial.println(i + 1);
-      }
-      else
-      {
-        Serial.println("Erro na contagem de jogadores");
+        Serial.println(contagemJogadores);
       }
     }
+    else
+    {
+      Serial.println("Mensagem inválida.");
+    }
   }
+  Serial.end();
 }
-void mqttConnect()
+void mqttConnect() // Conecta ao servidor MQTT e se inscreve nos tópicos dos jogadores
 {
   while (!client.connected())
   {
@@ -110,7 +100,7 @@ void mqttConnect()
     if (client.connect(mqtt_id))
     {
       Serial.println("Conectado com sucesso");
-      for (int i = 0; i < MaxPlayers; i++)
+      for (int i = 0; i < jogadoresMaximos; i++)
       {
         client.subscribe(mqtt_topic_subs[i].c_str());
       }
@@ -125,22 +115,22 @@ void mqttConnect()
   }
 }
 
-void checkPlayers()
+void numerojogadoresProntos() // Verifica o numero de jogadores prontos e comeca a partida
 {
   unsigned long tempoEspera = millis();        // Variável para armazenar o tempo de espera
   static unsigned long tempoUltimaConexao = 0; // Variável para armazenar o tempo da última conexão WiFi
 
-  if (playersCount >= 2 && !game.gameStarted)
+  if (contagemJogadores >= 2 && !jogo.jogoIniciado)
   {
     Serial.println("Numero de jogadores suficiente, iniciando o jogo...");
-    game.gameStarted = true;
+    jogo.jogoIniciado = true;
 
-    for (int i = 0; i < playersCount; i++)
+    for (int i = 0; i < contagemJogadores; i++)
     {
-      player[i].HandCards = true;
+      listajogador[i].HandCards = true;
     }
   }
-  else if (playersCount < 2)
+  else if (contagemJogadores < 2)
   {
 
     {
@@ -150,28 +140,79 @@ void checkPlayers()
   }
 }
 
-void cardsDistribution()
+void distribuicaoCartas() // Distribui as cartas para os jogadores
 {
-  
-randomSeed(1);
-  if (playersCount < 2) return;
 
-  const int cardsAmount = 3;
-  int cardsAvailable[cardsAmount] = {3, 3, 3};
-  int playersCards[playersCount][2];
+  randomSeed(analogRead(0)); // Inicializa o gerador de números aleatórios
 
-  for (int i = 0; i < playersCount; i++)
+  if (contagemJogadores < 2)
+    return;
+
+  const int quantidadeCartas = 3;
+  int cartasDisponiveis[quantidadeCartas] = {3, 3, 3};
+  int cartasJogadores[contagemJogadores][2];
+
+  for (int i = 0; i < contagemJogadores; i++)
   {
     for (int j = 0; j < 2; j++)
     {
-      int cardsToGive;
+      int cartasDistribuir;
+
       do
       {
-        int cardToGive = random(0, cardsAmount);
-      } while (cardsAvailable[cardsToGive] <= 0);
+        cartasDistribuir = random(0, quantidadeCartas);
+      } while (cartasDisponiveis[cartasDistribuir] <= 0);
 
-      playersCards[i][j] = cardsToGive;
-      cardsAvailable[cardsToGive]--;
+      cartasJogadores[i][j] = cartasDistribuir;
+      cartasDisponiveis[cartasDistribuir]--;
+
+      for (int i = 0; i < contagemJogadores; i++)
+      {
+        StaticJsonDocument<128> doc;
+        JsonArray cartas = doc.createNestedArray("cartas");
+        cartas.add(cartasJogadores[i][0]);
+        cartas.add(cartasJogadores[i][1]);
+        char buffer[128];
+        serializeJson(doc, buffer);
+        String topic = "jogador" + String(i + 1) + "/cartas";
+        client.publish(topic.c_str(), buffer);
+      }
+    }
+  }
+}
+
+void eliminarCartas(char *topic, byte *payload, unsigned int length) // le o topico mqtt do jogador e envia para todos os jogadores a acao
+{
+  String mensagem = "";
+  for (unsigned int i = 0; i < length; i++)
+  {
+    char c = (char)payload[i];
+    mensagem += c;
+  }
+
+  mensagem.trim();
+  mensagem.toLowerCase();
+
+  for (int i = 0; i < jogadoresMaximos; i++) // Verifica se a mensagem é de algum dos tópicos de inscrição
+  {
+    if (String(topic) == mqtt_topic_subs[i]) //
+    {
+      if (mensagem.startsWith("Eliminar")) //
+      {
+        client.publish("senai134/Diller/esp_inscrito", "As influencias estao sendo ameacadas!");
+      }
+      else if (mensagem.startsWith("Fim de turno"))
+      {
+        client.publish("senai134/Diller/esp_publicando", ("O turno do jogador " + String(i + 1) + " terminou!").c_str());
+      }
+      else if (mensagem.startsWith("Bloqueio"))
+      {
+        client.publish("senai134/Diller/esp_publicando", ("As influencias do jogador" + String(i + 1) + "estao salvas!").c_str());
+      }
+      else if (mensagem.startsWith("Roubar 2 moedas"))
+      {
+        client.publish("senai134/Diller/esp_publicando", ("Os fragmentos estao sendo almejados"));
+      }
     }
   }
 }
