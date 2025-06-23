@@ -34,8 +34,8 @@ void mqttConnect(void);
 struct Values
 {
   int Moedas = 6;           // Variável para armazenar a quantidade de fragmentos do Elo       
-  const int saci = -3;      // Valor da carta Saci
-  const int curupira = -2;  // Valor da carta Curupira
+  const int saci = 2;      // Valor da carta Saci
+  const int curupira = -3;  // Valor da carta Curupira
   const int maxMoedas = 15; // Valor máximo de fragmentos que o jogador pode ter
 };
 Values value; // Cria uma instância da estrutura Values
@@ -62,7 +62,10 @@ void exibirItemMenu();
 void atualizarBotoes();
 void atualizarJoystick();
 void verificarLDR();
-void sortearCartas();
+void receberCartas();
+void Curupira();
+void Iara();
+void Saci();
 const char *LendaNome(int codigo);
 
 // === Pinos ===
@@ -180,17 +183,13 @@ const char *obterDescricaoAcao(int acao)
   switch (acao)
   {
   case 1:
-    return "PEGUE 3 MOEDAS";
+    return "RITUAL "; 
   case 2:
-    return "ROUBA 2 MOEDAS ";
+    return "ROUBAR 2 MOEDAS ";
   case 3:
     return "BLOQUEIO   ";
   case 4:
     return "ELIMINAR CARTA ";
-  case 5:
-    return "TROCAR CARTAS  ";
-  case 6:
-    return "OLHAR CARTA    ";
   default:
     return "ERRO           ";
   }
@@ -267,6 +266,10 @@ for (int i = 0; i < 1; i++)
   {
     mqtt_topic_subs[i] = String("senai134/Jogador") + (i+1) + "/esp_inscrito";   // Define os tópicos de inscrição para cada jogador
     mqtt_topic_pubs[i] = String("senai134/Jogador") + (i+1) + "/esp_publicando"; // Define os tópicos de publicação para cada jogador
+
+    client.subscribe("jogador1/cartas"); // Inscreve no tópico de cartas do primeiro jogador
+
+    client.publish(mqtt_topic_pubs[i].c_str(), "Pronto"); // Publica que o jogador está pronto
   }
 
 // Apenas pro Segundo Jogador
@@ -274,17 +277,19 @@ for (int i = 0; i < 1; i++)
 //   {
 //     mqtt_topic_subs[i] = String("senai134/Jogador") + (i+2) + "/esp_inscrito";   // Define os tópicos de inscrição para cada jogador
 //     mqtt_topic_pubs[i] = String("senai134/Jogador") + (i+2) + "/esp_publicando"; // Define os tópicos de publicação para cada jogador
-//   }
-//client.subscribe("jogador2/cartas");
+//     client.subscribe("jogador2/cartas");
 
+//     client.publish(mqtt_topic_pubs[i].c_str(), "Pronto"); // Publica que o jogador está pronto
+//   }
 // Apenas pro Terceiro Jogador
 // for (int i = 0; i < 1; i++)
 //   {
 //     mqtt_topic_subs[i] = String("senai134/Jogador") + (i+3) + "/esp_inscrito";   // Define os tópicos de inscrição para cada jogador
 //     mqtt_topic_pubs[i] = String("senai134/Jogador") + (i+3) + "/esp_publicando"; // Define os tópicos de publicação para cada jogador
-//   }
-//  client.subscribe("jogador3/cartas");
+//    client.subscribe("jogador3/cartas");
 
+//     client.publish(mqtt_topic_pubs[i].c_str(), "Pronto"); // Publica que o jogador está pronto
+//   }
 
 
 // Apenas pro Quarto Jogador
@@ -292,10 +297,10 @@ for (int i = 0; i < 1; i++)
 //   {
 //     mqtt_topic_subs[i] = String("senai134/Jogador") + (i+4) + "/esp_inscrito";   // Define os tópicos de inscrição para cada jogador
 //     mqtt_topic_pubs[i] = String("senai134/Jogador") + (i+4) + "/esp_publicando"; // Define os tópicos de publicação para cada jogador
+//    client.subscribe("jogador4/cartas");
+
+//     client.publish(mqtt_topic_pubs[i].c_str(), "Pronto"); // Publica que o jogador está pronto
 //   }
-//  client.subscribe("jogador4/cartas");
-
-
 }
 
 // === Mostrar instruções ===
@@ -345,10 +350,8 @@ void receberCartas(char *topic, byte *payload, unsigned int length)
   lcd.setCursor(0, 1);
   lcd.print("CARTA 2: ");
   lcd.print(LendaNome(carta2));
-
-  lcd.setCursor(0, 3);
-  lcd.print("Pressione A...");
-  cartasRecebidas = true;
+  
+  exibirItemMenu();
 }
 
 // === Exibe o menu de ações com cartas e moedas ===
@@ -424,7 +427,7 @@ void loop()
 
   if (!cartasRecebidas)
   {
-    sortearCartas();
+    receberCartas();
     return;
   }
 
@@ -436,41 +439,6 @@ void loop()
   mqttConnect(); // Conecta ao MQTT se não estiver conectado
   client.loop(); // Mantém o loop do cliente MQTT ativo
 
-  //* Parte do Iara
-
-  if (true)//colocar uma condicao para quando selecionar o "Bloqueio"Se a ação for Iara
-  {
-    cards.Iara = true; // Ativa a carta Iara
-
-    client.publish("senai134/Diller/Jogador1/esp_publicando", "Bloqueio");
-
-    cards.Iara = false; 
-  }
-  
-    mostrarInstrucoesMenu();
-
-
-  //* Parte do Saci
-  if (true)//colocar uma condicao para quando selecionar o ""Se a ação for Iara
-  {
-    if (value.Moedas >= 3)
-    {
-      value.Moedas += value.saci; // Subtrai o valor da carta Saci
-
-      // todo : Adicionar funcao para eliminar uma carta do jogo
-
-      Serial.println("Carta Saci ativada! Você gastou 3 fragmentos para eliminar uma carta.");
-      Serial.print("Quantidade de fragmentos: ");
-      Serial.println(value.Moedas);
-    }
-    else
-    {
-      Serial.println("Você não tem fragmentos suficientes para usar a carta Saci.");
-      Serial.print("Quantidade de fragmentos: ");
-      Serial.println(value.Moedas);
-    }
-    cards.Saci = false; // Reseta o estado da carta Saci
-  }
 
   //* Parte da Draw(Compra de cartas)
 
@@ -501,26 +469,88 @@ void loop()
 
     // Mandar mensagem para o dealer resetando as cartas do jogador afetado pelo ritual
   }
+}
+void Iara()
+{
 
-  //* Parte do Curupira
-
-  if (cards.Curupira)
+if (obterDescricaoAcao(3) == "BLOQUEIO") 
   {
-    if (value.Moedas >= 2) // Se a carta for Curupira e moedas forem maiores que 2
+    cards.Iara = true; 
+    client.publish("senai134/Diller/Jogador1/esp_publicando", "Bloqueio");
+
+    cards.Iara = false; 
+  }
+  
+    exibirItemMenu();
+
+}
+
+void Saci()
+{
+
+  if (obterDescricaoAcao(2) == "ROUBAR 2 MOEDAS")
+  {
+
+    cards.Saci = true; 
+    client.publish("senai134/Diller/Jogador1/esp_publicando", "Roubar 2 Moedas");
+    //Todo: Adicionar o sensor vl53L0X para verificar a proximidade do jogador e roubar as moedas
+    
+      if (cards.Saci && vl53l0x)
+      {
+        value.Moedas += value.saci; 
+      }
+
+      cards.Saci = false; 
+  }
+
+  exibirItemMenu();
+
+}
+
+
+void Curupira()
+{
+
+  if(obterDescricaoAcao(4) == "ELIMINAR CARTA") 
+  {
+    cards.Curupira = true; 
+    client.publish("senai134/Diller/Jogador1/esp_publicando", "Eliminar carta");
+
+  if (cards.Curupira && value.Moedas >= 2) // Se a carta for Curupira e moedas forem maiores que 2
     {
-      value.Moedas += value.curupira; // Subtrai o valor da carta Curupira
-      Serial.println("Carta Curupira ativada! Você perdeu 2 fragmentos.");
-      amountMoedas(); // Chama a função para mostrar a quantidade de fragmentos
+      value.Moedas += value.curupira; // Subtrai o valor da carta Curupira  
+    }
+  }
+  cards.Curupira = false; // Reseta o estado da carta Curupira
+  exibirItemMenu();
+}
+
+void Ritual()
+{
+  if (obterDescricaoAcao(1) == "RITUAL") 
+  {
+    player.ritual = true; 
+    client.publish("senai134/Diller/Jogador1/esp_publicando", "Ritual do Esquecimento");
+  }
+
+  if (player.ritual)
+  {
+    if (value.Moedas >= 7) // Se tiver pelo menos 7 fragmentos
+    {
+      value.Moedas -= 7;     // Gasta 7 fragmentos
+      player.ritual = false; // Reseta o estado do ritual
+
+      client.publish(mqtt_topic_pubs[i].c_str(), "eliminar")  
+
+      // Mandar mensagem para o dealer resetando as cartas do jogador afetado pelo ritual
     }
     else
     {
-      Serial.println("Você não tem fragmentos suficientes para usar a carta Curupira.");
-      amountMoedas(); // Chama a função para mostrar a quantidade de fragmentos
+      Serial.println("Fragmentos insuficientes para realizar o ritual.");
     }
-    cards.Curupira = false; // Reseta o estado da carta Curupira
   }
+  
 
-  delay(2000);
 }
 
 void atualizarBotoes()
@@ -641,33 +671,25 @@ void limitMoedas()
   if (value.Moedas > value.maxMoedas) // Garante que não ultrapasse o máximo
   {
     value.Moedas = value.maxMoedas; // Reseta as moedas para 10 se exceder o limite
-    Serial.println("Você atingiu o máximo de fragmentos. Use o Ritual do Esquecimento para eliminar uma carta.");
   }
-}
-
-void amountMoedas()
-{
-  Serial.print("Quantidade de fragmentos: ");
-  Serial.println(value.Moedas); // Mostra a quantidade de moedas após a compra
 }
 
 void drawPhase()
 {
-
-  value.Moedas += 1; // Adiciona 1 fragmento ao total
-  Serial.println("Você coletou um Fragmento do Elo");
-  Serial.print("Quantidade de fragmentos restantes: ");
-  if (value.Moedas > 10)
+  if(player.draw)
   {
-    limitMoedas(); // Chama a função para limitar os fragmentos
+  value.Moedas += 1; // Adiciona 1 fragmento ao total
+   if (value.Moedas > 10)
+     {
+      limitMoedas(); // Chama a função para limitar os fragmentos
+     }
   }
-
   player.draw = false;
 }
 
 void callback(char *topic, byte *payload, unsigned int length)
 {
-  // Serial.printf("Mensagem recebida em %s: ", topic);
+  
 
   String mensagem = "";
   for (unsigned int i = 0; i < length; i++)
@@ -678,29 +700,6 @@ void callback(char *topic, byte *payload, unsigned int length)
 
   mensagem.trim();
   mensagem.toLowerCase();
-
-  // Serial.println(mensagem);
-
-  if (mensagem == "boto")
-  {
-    cards.Boto = true; // Ativa a carta Boto
-    // Serial.println("Carta Boto ativada!");
-  }
-  else if (mensagem == "saci")
-  {
-    cards.Saci = true; // Ativa a carta Saci
-    // Serial.println("Carta Saci ativada!");
-  }
-  else if (mensagem == "curupira")
-  {
-    cards.Curupira = true; // Ativa a carta Curupira
-    // Serial.println("Carta Curupira ativada!");
-  }
-  else if (mensagem == "ritual")
-  {
-    player.ritual = true; // Ativa o ritual do esquecimento
-    // Serial.println("Ritual do Esquecimento ativado!");
-  }
 }
 void mqttConnect()
 {
