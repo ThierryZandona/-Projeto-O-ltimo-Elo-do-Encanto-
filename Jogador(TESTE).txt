@@ -12,6 +12,7 @@
 
 WiFiClient espClient;
 PubSubClient client(espClient);
+VL53L0X_RangingMeasurementData_t measure;
 
 const char *mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
@@ -385,7 +386,9 @@ void exibirItemMenu()
 
 // === Loop principal ===
 void loop()
-{ btnC.update();
+{ 
+  lox.rangingTest(&measure, false);
+  btnC.update();
  btnD.update();
 
   delay(3000);
@@ -431,6 +434,7 @@ void loop()
     return;
   }
 
+  
   atualizarBotoes();
   atualizarJoystick();
   verificarLDR();
@@ -471,8 +475,8 @@ void loop()
   }
 }
 void Iara()
-{
 
+{
 if (obterDescricaoAcao(3) == "BLOQUEIO") 
   {
     cards.Iara = true; 
@@ -495,7 +499,7 @@ void Saci()
     client.publish("senai134/Diller/Jogador1/esp_publicando", "Roubar 2 Moedas");
     //Todo: Adicionar o sensor vl53L0X para verificar a proximidade do jogador e roubar as moedas
     
-      if (cards.Saci && vl53l0x)
+      if (cards.Saci && measure.RangeMIllimeter < 100)
       {
         value.Moedas += value.saci; 
       }
@@ -525,7 +529,7 @@ void Curupira()
   exibirItemMenu();
 }
 
-void Ritual()
+void Ritual(char *topic, byte *payload, unsigned int length)
 {
   if (obterDescricaoAcao(1) == "RITUAL") 
   {
@@ -540,19 +544,25 @@ void Ritual()
       value.Moedas -= 7;     // Gasta 7 fragmentos
       player.ritual = false; // Reseta o estado do ritual
 
-      client.publish(mqtt_topic_pubs[i].c_str(), "eliminar")  
 
-      // Mandar mensagem para o dealer resetando as cartas do jogador afetado pelo ritual
-    }
-    else
-    {
-      Serial.println("Fragmentos insuficientes para realizar o ritual.");
+      String mensagem = "";
+      for (unsigned int i = 0; i < length; i++) 
+            {
+              mensagem += (char)payload[i];
+            }
+              mensagem.trim();
+              mensagem.toLowerCase();
+
+      for (int i = 0; i < jogadoresMaximos; i++) 
+          {
+    if (String(topic) == mqtt_topic_subs[i]) 
+      client.publish(mqtt_topic_pubs[i].c_str(), "eliminar"); 
+
+      
+          }
     }
   }
-  
-
 }
-
 void atualizarBotoes()
 {
   btnSelecionar.update();
