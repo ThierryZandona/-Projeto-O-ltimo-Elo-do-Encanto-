@@ -5,214 +5,175 @@
 #include <internet.h>
 #include <PubSubClient.h>
 
-#define jogadoresMaximos 4 // Define o número máximo de jogadores
-#define cartasMaximas 3    // Define o número máximo de cada carta
+#define jogadoresMaximos 4
+#define cartasMaximas 3
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-struct Jogo
-{
-  bool jogoIniciado = false; // Variável para armazenar o estado do jogo
+struct Jogo {
+  bool jogoIniciado = false;
 };
 Jogo jogo;
 
-struct Jogadores
-{
-  bool HandCards = false; // Variável para armazenar o estado das cartas na mão do jogador
-  bool Ready = false;     //
+struct Jogadores {
+  bool HandCards = false;
+  bool Ready = false;
 };
 
-Jogadores listajogador[jogadoresMaximos]; // Cria um array de jogadores com o tamanho máximo definido
-
-int contagemJogadores = 0; // Variável para armazenar o número de jogadores
+Jogadores listajogador[jogadoresMaximos];
+int contagemJogadores = 0;
 
 const char *mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
-const char *mqtt_id = "esp32-senai225-Henrique";
-const char *mqtt_topic_sub = "senai134/Diller/esp_inscrito";
+const char *mqtt_id = "ProjetoCoup";
+const char *mqtt_topic_sub = "senai134/Dealer/esp_inscrito";
+
 String mqtt_topic_subs[jogadoresMaximos];
 String mqtt_topic_pubs[jogadoresMaximos];
 
 void mqttConnect(void);
 void numerojogadoresProntos(void);
 void distribuicaoCartas(void);
-void jogadoresProntos(void);
-void distribuicaoCartas(void);
+void jogadoresProntos(char *topic, byte *payload, unsigned int length);
 void eliminarCartas(char *topic, byte *payload, unsigned int length);
+void callbackMQTT(char *topic, byte *payload, unsigned int length);
+void conectaWiFi();
+void checkWiFi();
 
-void setup() // 
-{
-  conectaWiFi();                            // Conecta ao WiFi
-  client.setServer(mqtt_server, mqtt_port); // Define o servidor MQTT e a porta
-  client.setCallback(eliminarCartas);       // Define a função de callback para receber mensagens MQTT
-  for (int i = 0; i < jogadoresMaximos; i++)
-  {
-    mqtt_topic_subs[i] = String("senai134/Jogador") + (i + 1) + "/esp_inscrito";   // Define os tópicos de inscrição para cada jogador
-    mqtt_topic_pubs[i] = String("senai134/Jogador") + (i + 1) + "/esp_publicando"; // Define os tópicos de publicação para cada jogador
+void setup() {
+  conectaWiFi();
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callbackMQTT);
+
+  for (int i = 0; i < jogadoresMaximos; i++) {
+    mqtt_topic_subs[i] = String("senai134/Jogador") + (i + 1) + "/esp_inscrito";
+    mqtt_topic_pubs[i] = String("senai134/Jogador") + (i + 1) + "/esp_publicando";
   }
 }
 
-void loop()
-
-{
-  mqttConnect();
-  checkWiFi();
+void loop() {
+  if (WiFi.status() != WL_CONNECTED) conectaWiFi();
+  if (!client.connected()) mqttConnect();
   client.loop();
-  jogadoresProntos();
+  numerojogadoresProntos();
 }
 
-void jogadoresProntos() // Verifica e adiciona os jogadore ao jogo por meio do monitor serial(Corrigir provavelmente)
-{
-  Serial.begin(9600);
-  if (Serial.available())
-  {
-    String mensagem = Serial.readStringUntil('\n');
-    mensagem.trim();
-    mensagem.toLowerCase();
-
-    if (mensagem == "numero de jogadores")
-    {
-      int tamanho = mensagem.length();
-      String extration = mensagem.substring(18, tamanho); // Extrai o número de jogadores da mensagem
-      contagemJogadores = extration.toInt();
-
-      if (contagemJogadores < jogadoresMaximos)
-      {
-        listajogador[contagemJogadores].Ready = true;
-        Serial.print("Jogadores prontos: ");
-        Serial.println(contagemJogadores);
-      }
-    }
-    else
-    {
-      Serial.println("Mensagem inválida.");
-    }
-  }
-  Serial.end();
-}
-void mqttConnect() // Conecta ao servidor MQTT e se inscreve nos tópicos dos jogadores
-{
-  while (!client.connected())
-  {
-    Serial.println("Conectando ao MQTT...");
-
-    if (client.connect(mqtt_id))
-    {
-      Serial.println("Conectado com sucesso");
-      for (int i = 0; i < jogadoresMaximos; i++)
-      {
+void mqttConnect() {
+  while (!client.connected()) {
+    if (client.connect(mqtt_id)) {
+      for (int i = 0; i < jogadoresMaximos; i++) {
         client.subscribe(mqtt_topic_subs[i].c_str());
       }
-    }
-    else
-    {
-      Serial.print("Falha, rc=");
-      Serial.println(client.state());
-      Serial.println("Tentando novamente em 5 segundos");
+    } else {
       delay(5000);
     }
   }
 }
 
-void numerojogadoresProntos() // Verifica o numero de jogadores prontos e comeca a partida
+void jogadoresProntos(char *topic, byte *payload, unsigned int length) 
 {
-  unsigned long tempoEspera = millis();        // Variável para armazenar o tempo de espera
-  static unsigned long tempoUltimaConexao = 0; // Variável para armazenar o tempo da última conexão WiFi
-
-  if (contagemJogadores >= 2 && !jogo.jogoIniciado)
+  String mensagem = "";
+  for (unsigned int i = 0; i < length; i++) 
   {
-    Serial.println("Numero de jogadores suficiente, iniciando o jogo...");
-    jogo.jogoIniciado = true;
-
-    for (int i = 0; i < contagemJogadores; i++)
-    {
-      listajogador[i].HandCards = true;
-    }
+    mensagem += (char)payload[i];
   }
-  else if (contagemJogadores < 2)
+  mensagem.trim();
+  mensagem.toLowerCase();
+
+  for (int i = 0; i < jogadoresMaximos; i++) 
   {
-
+    if (String(topic) == mqtt_topic_subs[i]) 
     {
-      Serial.println("Aguardando mais jogadores");
-      delay(3000);
-    }
-  }
-}
-
-void distribuicaoCartas() // Distribui as cartas para os jogadores
-{
-
-  randomSeed(analogRead(0)); // Inicializa o gerador de números aleatórios
-
-  if (contagemJogadores < 2)
-    return;
-
-  const int quantidadeCartas = 3;
-  int cartasDisponiveis[quantidadeCartas] = {3, 3, 3};
-  int cartasJogadores[contagemJogadores][2];
-
-  for (int i = 0; i < contagemJogadores; i++)
-  {
-    for (int j = 0; j < 2; j++)
-    {
-      int cartasDistribuir;
-
-      do
+      if (mensagem.startsWith("pronto") && !listajogador[i].Ready) 
       {
-        cartasDistribuir = random(0, quantidadeCartas);
-      } while (cartasDisponiveis[cartasDistribuir] <= 0);
-
-      cartasJogadores[i][j] = cartasDistribuir;
-      cartasDisponiveis[cartasDistribuir]--;
-
-      for (int i = 0; i < contagemJogadores; i++)
-      {
-        StaticJsonDocument<128> doc;
-        JsonArray cartas = doc.createNestedArray("cartas");
-        cartas.add(cartasJogadores[i][0]);
-        cartas.add(cartasJogadores[i][1]);
-        char buffer[128];
-        serializeJson(doc, buffer);
-        String topic = "jogador" + String(i + 1) + "/cartas";
-        client.publish(topic.c_str(), buffer);
+        listajogador[i].Ready = true;
+        contagemJogadores++;
       }
     }
   }
 }
 
-void eliminarCartas(char *topic, byte *payload, unsigned int length) // le o topico mqtt do jogador e envia para todos os jogadores a acao
-{
-  String mensagem = "";
-  for (unsigned int i = 0; i < length; i++)
+void numerojogadoresProntos() {
+  if (contagemJogadores >= 2 && !jogo.jogoIniciado) 
   {
-    char c = (char)payload[i];
-    mensagem += c;
+    jogo.jogoIniciado = true;
+
+    for (int i = 0; i < contagemJogadores; i++)
+    {
+      listajogador[i].HandCards = false;
+    }
+
+    distribuicaoCartas();
+  }
+}
+
+void distribuicaoCartas() {
+  randomSeed(analogRead(0));
+
+  const int quantidadeCartas = 3;
+  int cartasDisponiveis[quantidadeCartas] = {3, 3, 3};
+  int cartasJogadores[jogadoresMaximos][2];
+
+  for (int i = 0; i < contagemJogadores; i++) 
+  {
+    for (int j = 0; j < 2; j++) 
+    {
+      int carta;
+      do 
+      {
+        carta = random(0, quantidadeCartas);
+      } while (cartasDisponiveis[carta] <= 0);
+
+      cartasJogadores[i][j] = carta;
+      cartasDisponiveis[carta]--;
+    }
+
+    JsonDocument doc;
+    JsonArray cartas = doc.createNestedArray("cartas");
+    cartas.add(cartasJogadores[i][0]);
+    cartas.add(cartasJogadores[i][1]);
+    char buffer[128];
+    serializeJson(doc, buffer);
+    String topic = "jogador" + String(i + 1) + "/cartas";
+    client.publish(topic.c_str(), buffer);
+    listajogador[i].HandCards = true;
+  }
+}
+
+void eliminarCartas(char *topic, byte *payload, unsigned int length) {
+  String mensagem = "";
+  for (unsigned int i = 0; i < length; i++) {
+    mensagem += (char)payload[i];
   }
 
   mensagem.trim();
   mensagem.toLowerCase();
 
-  for (int i = 0; i < jogadoresMaximos; i++) // Verifica se a mensagem é de algum dos tópicos de inscrição
-  {
-    if (String(topic) == mqtt_topic_subs[i]) //
-    {
-      if (mensagem.startsWith("Eliminar")) //
+  for (int i = 0; i < jogadoresMaximos; i++) {
+    if (String(topic) == mqtt_topic_subs[i]) {
+      if (mensagem.startsWith("eliminar")) 
       {
-        client.publish("senai134/Diller/esp_inscrito", "As influencias estao sendo ameacadas!");
-      }
-      else if (mensagem.startsWith("Fim de turno"))
+        client.publish("senai134/Dealer/esp_publicando", "As influencias estao sendo ameacadas!");
+      } 
+      else if (mensagem.startsWith("fim de turno")) 
       {
-        client.publish("senai134/Diller/esp_publicando", ("O turno do jogador " + String(i + 1) + " terminou!").c_str());
-      }
-      else if (mensagem.startsWith("Bloqueio"))
+        client.publish("senai134/Dealer/esp_publicando", ("O turno do jogador " + String(i + 1) + " terminou!").c_str());
+      } 
+      else if (mensagem.startsWith("bloqueio")) 
       {
-        client.publish("senai134/Diller/esp_publicando", ("As influencias do jogador" + String(i + 1) + "estao salvas!").c_str());
-      }
-      else if (mensagem.startsWith("Roubar 2 moedas"))
+        client.publish("senai134/Dealer/esp_publicando", ("As influencias do jogador " + String(i + 1) + " estao salvas!").c_str());
+      } 
+      
+      else if (mensagem.startsWith("roubar 2 moedas")) 
       {
-        client.publish("senai134/Diller/esp_publicando", ("Os fragmentos estao sendo almejados"));
+        client.publish("senai134/Dealer/esp_publicando", "Os fragmentos estao sendo almejados");
       }
     }
   }
+}
+
+void callbackMQTT(char *topic, byte *payload, unsigned int length) {
+  jogadoresProntos(topic, payload, length);
+  eliminarCartas(topic, payload, length);
 }
