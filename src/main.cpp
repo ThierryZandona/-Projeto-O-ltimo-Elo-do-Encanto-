@@ -1,12 +1,17 @@
 #include <Arduino.h>
 #include <Bounce2.h>
 #include <LiquidCrystal_I2C.h>
+#include <SPI.h>
+#include <MFRC522.h>
 #include <PubSubClient.h>
 #include <internet.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
-#include <Wire.h>
 
+// Pinos conectados ao RC522
+#define SS_PIN 5               // SDA do RC522
+#define RST_PIN 22             // RST do RC522
+MFRC522 rfid(SS_PIN, RST_PIN); // cria o objeto do leitor
 WiFiClient espClient;
 PubSubClient client(espClient);
 
@@ -47,7 +52,6 @@ struct playerState
   // bool endturn = false; // Variável para armazenar o estado do turno (provavelmente pro diller)
   bool ritual = false; // Variável para armazenar o estado da carta golpe de estado
 };
-
 playerState player; // Cria uma instância da estrutura player
 
 // === Protótipos ===
@@ -57,42 +61,37 @@ void atualizarBotoes();
 void atualizarJoystick();
 void verificarLDR();
 void sortearCartas();
-void atualizarCartasNaTela();
-void verificarSensorProximidade();
-
 const char *LendaNome(int codigo);
 
 // === Pinos ===
 const int pinoLDR = 33;
 const int botaoSelecionar = 14;
 const int botaoVoltar = 12;
-const int botaoEsconderCarta2 = 13; // Botão C
-const int botaoEsconderCarta1 = 27; // Botão D
-const int botaoDuvido = 25;         // Botão F
-const int botaoFimDeTurno = 4;      // Botão E
+const int botaoEsconderCarta1 = 27; //Botão D
+const int botaoEsconderCarta2 = 13;// Botão C
+const int botaoDuvido = 26;  // Botão F
 
 const int joystickXPin = 34;
 const int joystickYPin = 35;
 
-const int led1 = 26;
+const int led1 = 25;
 const int led2 = 18;
+const int led3 = 26;
 
 // === LCD ===
-LiquidCrystal_I2C lcd(0x27, 20, 4);
+LiquidCrystal_I2C lcd(0x27, 16, 4);
 
 // === Botões com debounce ===
+Bounce btnDuvido = Bounce();
 Bounce btnSelecionar = Bounce();
 Bounce btnVoltar = Bounce();
 Bounce btnEsconderCarta1 = Bounce();
 Bounce btnEsconderCarta2 = Bounce();
-Bounce btnDuvido = Bounce();
-Bounce btnFimDeTurno = Bounce();
 
 // === Menu ===
 int indiceMenu = 0;
-const int totalAcoes = 7;
+const int totalAcoes = 6;
 bool emMenu = false;
-int acaoSelecionada = 1;
 
 // === Controle do joystick ===
 const int deadzone = 400;
@@ -169,18 +168,11 @@ int lenda1 = -1;
 int lenda2 = -1;
 bool cartasSorteadas = false;
 
-//=== Variaveis das cartas===
+//===Esconder cartas===
+
 bool esconderCarta1 = false;
 bool esconderCarta2 = false;
-bool ultimoEstadoCarta1 = false;
-bool ultimoEstadoCarta2 = false;
-
-
-
-//=== Objeto do Sensor VL52L0X ====
-// Adafruit_VL53L0X lox = Adafruit_VL53L0X();
-// #define LOX_ADDRESS 0x31
-// #define SHT_LOX1 19
+bool duvidar = false;
 
 // === Funções auxiliares ===
 
@@ -200,8 +192,6 @@ const char *obterDescricaoAcao(int acao)
     return "TROCAR CARTAS  ";
   case 6:
     return "OLHAR CARTA    ";
-  case 7:
-    return "RENDA          ";
   default:
     return "ERRO           ";
   }
@@ -227,6 +217,10 @@ void setup()
 {
   Serial.begin(9600);
 
+  SPI.begin();     // Inicia SPI com GPIOs padrão do ESP32
+  rfid.PCD_Init(); // Inicia o RC522
+  delay(1000);
+  Serial.println("Aproxime um cartão RFID...");
   conectaWiFi();                            // Conecta ao WiFi
   client.setServer(mqtt_server, mqtt_port); // Define o servidor MQTT e a porta
   client.setCallback(callback);             // Define a função de callback para receber mensagens MQTT
@@ -237,11 +231,10 @@ void setup()
   pinMode(botaoVoltar, INPUT_PULLUP);
   pinMode(botaoEsconderCarta1, INPUT_PULLUP);
   pinMode(botaoEsconderCarta2, INPUT_PULLUP);
-  pinMode(botaoDuvido, INPUT_PULLUP);
-  pinMode(botaoFimDeTurno, INPUT_PULLUP);
 
   pinMode(led1, OUTPUT);
   pinMode(led2, OUTPUT);
+  pinMode(led3, OUTPUT);
   pinMode(pinoLDR, INPUT);
 
   btnSelecionar.attach(botaoSelecionar);
@@ -252,16 +245,7 @@ void setup()
   btnEsconderCarta2.interval(25);
   btnEsconderCarta1.attach(botaoEsconderCarta1);
   btnEsconderCarta1.interval(25);
-  btnDuvido.attach(botaoDuvido);
-  btnDuvido.interval(25);
 
-  // if (!lox.begin())
-  // {
-  //   Serial.println("VL53L0X nao encontrado");
-  //   while (1)
-  //     ;
-  // }
-  
   lcd.init();
   lcd.backlight();
 
@@ -281,9 +265,6 @@ void setup()
   delay(2000);
 
   mostrarInstrucoesMenu();
-
-  // Inicialização do Sensor VL53L0X
-
 }
 
 // === Mostrar instruções ===
@@ -360,8 +341,60 @@ const unsigned long intervalo = 200; // Atualiza a tela a cada 200ms
 // === Loop principal ===
 void loop()
 {
-  atualizarBotoes();
-  atualizarCartasNaTela();
+
+  JsonDocument doc;
+  String mensagem;
+
+  if (btnEsconderCarta1.fell()) // Alterna carta 1
+  {
+    esconderCarta1 = !esconderCarta1;
+    Serial.printf("Pressionado D, esconderCarta1 = %i\n", esconderCarta1);
+  }
+
+  if (btnEsconderCarta2.fell()) // Alterna carta 2
+  {
+    esconderCarta2 = !esconderCarta2;
+    Serial.printf("Pressionado C, esconderCarta2 = %i\n", esconderCarta2);
+  }
+
+  unsigned long agora = millis();
+  if (agora - tempoAnterior >= intervalo)
+  {
+    tempoAnterior = agora;
+
+    // Atualiza carta 1
+    lcd.setCursor(0, 1);
+    if (esconderCarta1)
+      lcd.print("C1:          ");
+    
+    else
+    {
+      lcd.print("C1: ");
+      lcd.print(LendaNome(lenda1));
+    }
+
+    // Atualiza carta 2
+    lcd.setCursor(0, 2);
+    if (esconderCarta2)
+      lcd.print("C2:          ");
+    else
+    {
+      lcd.print("C2: ");
+      lcd.print(LendaNome(lenda2));
+    }
+  }
+
+  if (btnDuvido.fell())
+  {
+    duvidar = !duvidar;
+  }
+
+  if (duvidar)
+  {
+    
+    String mensagem = {};
+   //client.publish(/,mensagem.c_str);
+  }
 
   if (!cartasSorteadas)
   {
@@ -369,9 +402,14 @@ void loop()
     return;
   }
 
+  atualizarBotoes();
   atualizarJoystick();
-  verificarSensorProximidade();
   verificarLDR();
+
+  if (!rfid.PICC_IsNewCardPresent())
+    return;
+  if (!rfid.PICC_ReadCardSerial())
+    return;
 
   checkWiFi();   // Verifica a conexão WiFi
   mqttConnect(); // Conecta ao MQTT se não estiver conectado
@@ -471,17 +509,33 @@ void loop()
 
   if (!cards.Boto && !cards.Saci && !cards.Curupira && !player.ritual && !player.draw)
   {
+    if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial())
+    {
+      String uid = "";
+      for (byte i = 0; i < rfid.uid.size; i++)
+      {
+        if (rfid.uid.uidByte[i] < 0x10)
+          uid += "0";
+        uid += String(rfid.uid.uidByte[i], HEX);
+      }
+      uid.toUpperCase();
+
+      Serial.print("UID lido: ");
+      Serial.println(uid);
+
+      rfid.PICC_HaltA();
+      rfid.PCD_StopCrypto1();
+    }
   }
 }
 
 void atualizarBotoes()
 {
   btnSelecionar.update();
+  btnDuvido.update();
   btnVoltar.update();
   btnEsconderCarta1.update();
   btnEsconderCarta2.update();
-  btnDuvido.update();
-  btnFimDeTurno.update();
 
   if (btnSelecionar.fell())
   {
@@ -492,28 +546,14 @@ void atualizarBotoes()
       exibirItemMenu();
       return;
     }
-if (btnSelecionar.fell() && !cartasSorteadas) {
-    sortearCartas();
-    cartasSorteadas = true;
-}
 
     if (emMenu)
     {
-      acaoSelecionada = indiceMenu + 1;
       lcd.clear();
       lcd.setCursor(0, 1);
       lcd.print("ACAO SELECIONADA:");
       lcd.setCursor(0, 2);
-      lcd.print(obterDescricaoAcao(acaoSelecionada));
-
-      // === Enviar ação via MQTT ===
-      JsonDocument doc;
-      doc["acao"] = obterDescricaoAcao(acaoSelecionada);
-      String mensagem;
-      serializeJson(doc, mensagem);
-      client.publish(mqtt_topic_pub, mensagem.c_str());
-      Serial.println("Ação enviada via MQTT: " + mensagem);
-
+      lcd.print(obterDescricaoAcao(indiceMenu + 1));
       delay(3000);
       exibirItemMenu();
     }
@@ -528,61 +568,7 @@ if (btnSelecionar.fell() && !cartasSorteadas) {
     lcd.print("Pressione A p/menu");
     emMenu = false;
   }
-
-  // Atualização das Cartas no Lcd
-  if (btnEsconderCarta1.fell()) // Alterna carta 1
-  {
-    esconderCarta1 = !esconderCarta1;
-    Serial.printf("Pressionado D, esconderCarta1 = %i\n", esconderCarta1);
-  }
-
-  if (btnEsconderCarta2.fell()) // Alterna carta 2
-  {
-    esconderCarta2 = !esconderCarta2;
-    Serial.printf("Pressionado C, esconderCarta2 = %i\n", esconderCarta2);
-  }
-
-  // Envio da Contestação
-  if (btnDuvido.fell())
-  {
-    JsonDocument doc;
-    doc["duvidar"] = true;
-    String mensagem;
-    serializeJson(doc, mensagem);
-    client.publish(mqtt_topic_pub, mensagem.c_str()); // Envio da mensagem "duvidar", quando o jogador é constestado.
-    Serial.println("Mensagem de dúvida enviada");
-  }
-
-  // Envio do fim de Turno
-  if (btnFimDeTurno.fell())
-  {
-    JsonDocument doc;
-    doc["fimDeTurno"] = true;
-    String mensagem;
-    serializeJson(doc, mensagem);
-    client.publish(mqtt_topic_pub, mensagem.c_str()); // Envio da mensagem "fim de turno", quando o jogador finaliza sua joagada.
-    Serial.println("Mensagem de fim de turno enviada");
-  }
 }
-
-void atualizarCartasNaTela() {
-  lcd.setCursor(0, 1);
-  if (esconderCarta1)
-    lcd.print("C1:          ");
-  else {
-    lcd.print("C1: ");
-    lcd.print(LendaNome(lenda1));
-  }
-
-  lcd.setCursor(0, 2);
-  if (esconderCarta2)
-    lcd.print("C2:          ");
-  else {
-    lcd.print("C2: ");
-    lcd.print(LendaNome(lenda2));
-  }
-}
-
 
 // === Atualizar joystick para navegar menu ===
 void atualizarJoystick()
@@ -590,77 +576,53 @@ void atualizarJoystick()
   if (!emMenu)
   {
     return;
-  }
-  int y = analogRead(joystickYPin) - 4000;
-  int x = analogRead(joystickXPin) - 4000;
-  int dirX = 0;
-  int dirY = 0;
 
-  if (abs(y) > deadzone)
-    dirY = (y > 0) ? 1 : -1;
-  if (abs(x) > deadzone)
-    dirX = (x > 0) ? 1 : -1;
+    int y = analogRead(joystickYPin) - 4000;
+    int x = analogRead(joystickXPin) - 4000;
+    int dirX = 0;
+    int dirY = 0;
 
-  unsigned long agora = millis();
-  if (agora - ultimaLeituraJoystick < debounceJoystick)
-    return;
+    if (abs(y) > deadzone)
+      dirY = (y > 0) ? 1 : -1;
+    if (abs(x) > deadzone)
+      dirX = (x > 0) ? 1 : -1;
 
-  if (dirY != 0 && dirY != UltimaDirecaoY)
-  {
-    if (dirY == 1)
+    unsigned long agora = millis();
+    if (agora - ultimaLeituraJoystick < debounceJoystick)
+      return;
+
+    if (dirY != 0 && dirY != UltimaDirecaoY)
     {
-      indiceMenu = (indiceMenu - 1 + totalAcoes) % totalAcoes;
-      exibirItemMenu();
+      if (dirY == 1)
+      {
+        indiceMenu = (indiceMenu - 1 + totalAcoes) % totalAcoes;
+        exibirItemMenu();
+      }
+      else if (dirY == -1)
+      {
+        indiceMenu = (indiceMenu + 1) % totalAcoes;
+        exibirItemMenu();
+      }
+      ultimaLeituraJoystick = agora;
+      UltimaDirecaoY = dirY;
     }
-    else if (dirY == -1)
+    else if (dirY == 0)
     {
-      indiceMenu = (indiceMenu + 1) % totalAcoes;
-      exibirItemMenu();
+      // Libera o joystick: permite nova navegação depois
+      UltimaDirecaoY = 0;
     }
-    ultimaLeituraJoystick = agora;
-    UltimaDirecaoY = dirY;
-  }
-  else if (dirY == 0)
-  {
-    // Libera o joystick: permite nova navegação depois
-    UltimaDirecaoY = 0;
-  }
 
-  if (dirX != UltimaDirecaoX)
-  {
-    if (dirX == 1)
-      Serial.println("Joystick para direita");
-    else if (dirX == -1)
-      Serial.println("Joystick para esquerda");
-    UltimaDirecaoX = dirX;
+    if (dirX != UltimaDirecaoX)
+    {
+      if (dirX == 1)
+        Serial.println("Joystick para direita");
+      else if (dirX == -1)
+        Serial.println("Joystick para esquerda");
+      UltimaDirecaoX = dirX;
+    }
   }
 }
 
-// === Verifcar o sensor VL53L0X ===
-void verificarSensorProximidade()
-{
-  // VL53L0X_RangingMeasurementData_t measure;
-  // lox.rangingTest(&measure, false);
-
-  // if (measure.RangeStatus != 4)
-  // {
-  //   if (measure.RangeMilliMeter < 100)
-  //   {
-  //     Serial.println("Sensor detectou aproximação");
-
-      /*JsonDocument doc;
-    
-      doc["roubo"] = true;
-      String mensagem;
-      serializeJson(doc, mensagem);
-      client.publish(mqtt_topic_pub, mensagem.c_str()); // Envio da mensagem "roubo", quando o jogador teve seus fragemntos pegos por alguém
-      Serial.println("Mensagem de que alguem está te roubando enviada");
-*/
-      
-//       delay(1500);
-//     }
-//   }
- }
 // === Verificar sensor LDR para diminuir moedas ===
 void verificarLDR()
 {
@@ -767,3 +729,4 @@ void mqttConnect()
     }
   }
 }
+ 
