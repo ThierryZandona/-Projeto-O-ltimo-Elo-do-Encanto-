@@ -1,118 +1,444 @@
 #include <Arduino.h>
-#include <SPI.h>
-#include <MFRC522.h>
+#include <Bounce2.h>
+#include <LiquidCrystal_I2C.h>
 #include <PubSubClient.h>
 #include <internet.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
-// Pinos conectados ao RC522
-#define SS_PIN 5   // SDA do RC522
-#define RST_PIN 22 // RST do RC522
+#include <Wire.h>
+#include "Adafruit_VL53L0X.h"
+#define jogadoresMaximos 4 // Define o número máximo de jogadores
 
-MFRC522 rfid(SS_PIN, RST_PIN); // cria o objeto do leitor
+
 WiFiClient espClient;
 PubSubClient client(espClient);
 
 const char *mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
-const char *mqtt_id = "esp32-senai225-Henrique";
-const char *mqtt_topic_sub = "senai134/mesaDiller/esp_inscrito";
-const char *mqtt_topic_pub = "senai134/mesaJogador/esp_publicando";
+const char *mqtt_id = "ProjetoCoup";
+const char *mqtt_topic_sub = "senai134/Dealer/esp_inscrito";
+const char *mqtt_topic_pub = "senai134/Dealer/esp_publicando";
+String mqtt_topic_subs[jogadoresMaximos];
+String mqtt_topic_pubs[jogadoresMaximos];
 
-void limitFragments();
-void amountFragments();
+
+
+
+void limitMoedas();
+void amountMoedas();
 void drawPhase();
 void callback(char *, byte *, unsigned int);
 void mqttConnect(void);
-// TODO : Adicionar a parte do Curupira, a funcao de eliminar cartas(nao sei se e no esp do diller ou do jogador) e adicionar o MQTT
+
 
 struct Values
 {
-  int fragment = 6;            // Variável para armazenar a quantidade de fragmentos do Elo
-  const int boto = 3;          // Valor da carta Boto
-  const int saci = -3;         // Valor da carta Saci
-  const int curupira = -2;     // Valor da carta Curupira
-  const int maxfragments = 10; // Valor máximo de fragmentos que o jogador pode ter
+  int Moedas = 6;           // Variável para armazenar a quantidade de fragmentos do Elo       
+  const int saci = 2;      // Valor da carta Saci
+  const int curupira = -3;  // Valor da carta Curupira
+  const int maxMoedas = 15; // Valor máximo de fragmentos que o jogador pode ter
 };
 Values value; // Cria uma instância da estrutura Values
 
 struct CardsState
 {
-  bool Boto = false;     // Variável para armazenar o estado da carta boto cor de rosa
-  bool Saci = false;     // Variável para armazenar o estado da carta saci
   bool Curupira = false; // Variável para armazenar o estado da carta curupira
+  bool Saci = false;     // Variável para armazenar o estado da carta saci
+  bool Iara = false;     // Variável para armazenar o estado da carta iara cor de rosa
 };
 CardsState cards; // Cria uma instância da estrutura cards
 
 struct playerState
 {
-  bool draw = false;     // Variável para armazenar o estado da compra
-  //bool endturn = false; // Variável para armazenar o estado do turno (provavelmente pro diller)
-  bool ritual = false;  // Variável para armazenar o estado da carta golpe de estado
+  bool draw = false; // Variável para armazenar o estado da compra
+  bool endturn = false; // Variável para armazenar o estado do turno (provavelmente pro diller)
+  bool ritual = false; // Variável para armazenar o estado da carta golpe de estado
 };
 playerState player; // Cria uma instância da estrutura player
 
+// === Protótipos ===
+void mostrarInstrucoesMenu();
+void exibirItemMenu();
+void atualizarBotoes();
+void atualizarJoystick();
+void verificarLDR();
+void receberCartas();
+void Curupira();
+void Iara();
+void Saci();
+const char *LendaNome(int codigo);
+
+// === Pinos ===
+const int pinoLDR = 33;
+const int botaoSelecionar = 14;
+const int botaoVoltar = 12;
+const int botaoC = 27;
+const int botaoD = 13;
+
+const int joystickXPin = 34;
+const int joystickYPin = 35;
+
+const int led1 = 25;
+const int led2 = 18;
+const int led3 = 26;
+
+// === LCD ===
+LiquidCrystal_I2C lcd(0x27, 16, 4);
+
+// === Botões com debounce ===
+Bounce btnSelecionar = Bounce();
+Bounce btnVoltar = Bounce();
+Bounce btnC = Bounce();
+Bounce btnD = Bounce();
+
+// === Menu ===
+int indiceMenu = 0;
+const int totalAcoes = 6;
+bool emMenu = false;
+
+// === Controle do joystick ===
+const int deadzone = 400;
+unsigned long ultimaLeituraJoystick = 0;
+const unsigned long debounceJoystick = 250;
+int UltimaDirecaoX = 0;
+int UltimaDirecaoY = 0;
+
+// === Estado do jogo ===
+int moedas = 2;
+
+// === Tempo ===
+const unsigned long intervaloMoeda = 1000;
+unsigned long ultimaAtualizacaoMoeda = 0;
+
+// === Icones Personalizados ===
+byte moedaChar[8] = {
+    0B00100,
+    0B01110,
+    0B10101,
+    0B01100,
+    0B00111,
+    0B10101,
+    0B01110,
+    0B00100,
+};
+
+byte aChar[8] = {
+    0B01101,
+    0B10010,
+    0B00000,
+    0B01111,
+    0B00001,
+    0B11111,
+    0B10001,
+    0B01111,
+};
+
+byte oChar[8] = {
+    0B01101,
+    0B10010,
+    0B00000,
+    0B01110,
+    0B10001,
+    0B10001,
+    0B10001,
+    0B01110,
+};
+
+byte cChar[8] = {
+    0B00000,
+    0B01110,
+    0B10000,
+    0B10000,
+    0B10000,
+    0B01110,
+    0B00100,
+    0B01100,
+};
+
+byte uChar[8] = {
+    0B00010,
+    0B10101,
+    0B10001,
+    0B10001,
+    0B10001,
+    0B10001,
+    0B10001,
+    0B01110,
+};
+
+// === Cartas sorteadas ===
+int carta1 = -1;
+int carta2 = -1;
+bool cartasRecebidas = false;
+
+//===Esconder cartas===
+
+bool esconderCarta1 = true;
+bool esconderCarta2 = true;
+
+// === Funções auxiliares ===
+
+const char *obterDescricaoAcao(int acao)
+{
+  switch (acao)
+  {
+  case 1:
+    return "RITUAL "; 
+  case 2:
+    return "ROUBAR 2 MOEDAS ";
+  case 3:
+    return "BLOQUEIO   ";
+  case 4:
+    return "ELIMINAR CARTA ";
+  default:
+    return "ERRO           ";
+  }
+}
+
+const char *LendaNome(int codigo)
+{
+  switch (codigo)
+  {
+  case 2:
+    return "CURUPIRA";
+  case 3:
+    return "IARA    ";
+  case 4:
+    return "SACI    ";
+  default:
+    return "N/A     ";
+  }
+}
+
+// === Setup ===
 void setup()
 {
   Serial.begin(9600);
-  SPI.begin();     // Inicia SPI com GPIOs padrão do ESP32
-  rfid.PCD_Init(); // Inicia o RC522
-  delay(1000);
-  Serial.println("Aproxime um cartão RFID...");
-  conectaWiFi(); // Conecta ao WiFi
-  client.setServer(mqtt_server, mqtt_port);// Define o servidor MQTT e a porta
-  client.setCallback(callback); // Define a função de callback para receber mensagens MQTT
+  Wire.begin();
+
+  conectaWiFi();                            // Conecta ao WiFi
+  client.setServer(mqtt_server, mqtt_port); // Define o servidor MQTT e a porta
+  client.setCallback(callback);             // Define a função de callback para receber mensagens MQTT
+  client.subscribe("jogador1/cartas");
+  
+  randomSeed(analogRead(36));
+
+  pinMode(botaoSelecionar, INPUT_PULLUP);
+  pinMode(botaoVoltar, INPUT_PULLUP);
+  pinMode(botaoC, INPUT_PULLUP);
+  pinMode(botaoD, INPUT_PULLUP);
+
+  pinMode(led1, OUTPUT);
+  pinMode(led2, OUTPUT);
+  pinMode(led3, OUTPUT);
+  pinMode(pinoLDR, INPUT);
+
+  btnSelecionar.attach(botaoSelecionar);
+  btnSelecionar.interval(25);
+  btnVoltar.attach(botaoVoltar);
+  btnVoltar.interval(25);
+  btnC.attach(botaoC);
+  btnC.interval(25);
+  btnD.attach(botaoD);
+  btnD.interval(25);
+
+  lcd.init();
+  lcd.backlight();
+
+  lcd.createChar(0, moedaChar);
+  lcd.createChar(1, aChar);
+  lcd.createChar(2, oChar);
+  lcd.createChar(3, cChar);
+  lcd.createChar(4, uChar);
+
+  lcd.clear();
+  lcd.setCursor(4, 1);
+  lcd.write(byte(4));
+  lcd.setCursor(5, 1);
+  lcd.print("LTIMO ELO");
+  lcd.setCursor(4, 2);
+  lcd.print("ENCANTADO");
+  delay(2000);
+
+  mostrarInstrucoesMenu();
+// Apenas pro Primeiro Jogador
+for (int i = 0; i < 1; i++)
+  {
+    mqtt_topic_subs[i] = String("senai134/Jogador") + (i+1) + "/esp_inscrito";   // Define os tópicos de inscrição para cada jogador
+    mqtt_topic_pubs[i] = String("senai134/Jogador") + (i+1) + "/esp_publicando"; // Define os tópicos de publicação para cada jogador
+
+    client.subscribe("jogador1/cartas"); // Inscreve no tópico de cartas do primeiro jogador
+
+    client.publish(mqtt_topic_pubs[i].c_str(), "Pronto"); // Publica que o jogador está pronto
+  }
+
+// Apenas pro Segundo Jogador
+// for (int i = 0; i < 1; i++)
+//   {
+//     mqtt_topic_subs[i] = String("senai134/Jogador") + (i+2) + "/esp_inscrito";   // Define os tópicos de inscrição para cada jogador
+//     mqtt_topic_pubs[i] = String("senai134/Jogador") + (i+2) + "/esp_publicando"; // Define os tópicos de publicação para cada jogador
+//     client.subscribe("jogador2/cartas");
+
+//     client.publish(mqtt_topic_pubs[i].c_str(), "Pronto"); // Publica que o jogador está pronto
+//   }
+// Apenas pro Terceiro Jogador
+// for (int i = 0; i < 1; i++)
+//   {
+//     mqtt_topic_subs[i] = String("senai134/Jogador") + (i+3) + "/esp_inscrito";   // Define os tópicos de inscrição para cada jogador
+//     mqtt_topic_pubs[i] = String("senai134/Jogador") + (i+3) + "/esp_publicando"; // Define os tópicos de publicação para cada jogador
+//    client.subscribe("jogador3/cartas");
+
+//     client.publish(mqtt_topic_pubs[i].c_str(), "Pronto"); // Publica que o jogador está pronto
+//   }
+
+
+// Apenas pro Quarto Jogador
+// for (int i = 0; i < 1; i++)
+//   {
+//     mqtt_topic_subs[i] = String("senai134/Jogador") + (i+4) + "/esp_inscrito";   // Define os tópicos de inscrição para cada jogador
+//     mqtt_topic_pubs[i] = String("senai134/Jogador") + (i+4) + "/esp_publicando"; // Define os tópicos de publicação para cada jogador
+//    client.subscribe("jogador4/cartas");
+
+//     client.publish(mqtt_topic_pubs[i].c_str(), "Pronto"); // Publica que o jogador está pronto
+//   }
 }
 
-void loop()
+// === Mostrar instruções ===
+void mostrarInstrucoesMenu()
 {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Use Joystick UP/DN");
+  lcd.setCursor(0, 1);
+  lcd.print("A=selecionar B=sair");
+  delay(1500);
+}
 
-  if (!rfid.PICC_IsNewCardPresent())
-    return;
-  if (!rfid.PICC_ReadCardSerial())
-    return;
+// === Sortear cartas e mostrar na tela ===
+void receberCartas(char *topic, byte *payload, unsigned int length)
+{
+  lcd.clear();
+  lcd.setCursor(3, 1);
+  lcd.print("RECEBENDO CARTAS");
+  delay(1500);
 
-  checkWiFi(); // Verifica a conexão WiFi
+  StaticJsonDocument<128> doc;
+  DeserializationError erro = deserializeJson(doc, payload, length);
+
+  if (erro) 
+  {
+    Serial.print("Erro ao ler JSON: ");
+    Serial.println(erro.c_str());
+    return;
+  }
+
+  JsonArray cartas = doc["cartas"];
+  int carta1 = cartas[0];
+  int carta2 = cartas[1];
+
+  Serial.print("Carta 1: ");
+  Serial.println(carta1);
+  Serial.print("Carta 2: ");
+  Serial.println(carta2);
+
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("CARTA 1: ");
+  lcd.print(LendaNome(carta1));
+
+  lcd.setCursor(0, 1);
+  lcd.print("CARTA 2: ");
+  lcd.print(LendaNome(carta2));
+  
+  exibirItemMenu();
+}
+
+// === Exibe o menu de ações com cartas e moedas ===
+void exibirItemMenu()
+{
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("A");
+  lcd.setCursor(1, 0);
+  lcd.write(byte(3));
+  lcd.setCursor(2, 0);
+  lcd.write(byte(2));
+  lcd.setCursor(3, 0);
+  lcd.print("es: ");
+
+  lcd.setCursor(6, 0);
+  lcd.print(obterDescricaoAcao(indiceMenu + 1));
+  lcd.setCursor(0, 1);
+  lcd.print("C1: ");
+  lcd.print(LendaNome(carta1));
+
+  lcd.setCursor(0, 2);
+  lcd.print("C2: ");
+  lcd.print(LendaNome(carta2));
+  lcd.setCursor(0, 3);
+  lcd.print("Moedas:");
+  lcd.print(moedas);
+  lcd.write(byte(0));
+}
+
+// === Loop principal ===
+void loop()
+{ btnC.update();
+ btnD.update();
+
+  delay(3000);
+  if (btnD.fell()) // esconde a carta 1 quando pressionado
+  {
+    esconderCarta1 = !esconderCarta1;
+    Serial.printf("Pressionado, %i", esconderCarta1);
+  }
+
+  if (esconderCarta1)
+  {
+    lcd.setCursor(0, 1);
+    lcd.print("C1:        ");
+  }
+
+  if (!esconderCarta1)
+  {
+    lcd.setCursor(0, 1);
+    lcd.print("C1: ");
+    lcd.print(LendaNome(carta1));
+  }
+
+  if (btnC.fell()) // esconde a carta 1 quando pressionado
+  {
+    esconderCarta2 = !esconderCarta2;
+  }
+
+  if (esconderCarta2)
+  {
+    lcd.setCursor(0, 2);
+    lcd.print("C2:        ");
+  }
+  else
+  {
+    lcd.setCursor(0, 2);
+    lcd.print("C2: ");
+    lcd.print(LendaNome(carta2));
+  }
+
+  if (!cartasRecebidas)
+  {
+    receberCartas();
+    return;
+  }
+
+  atualizarBotoes();
+  atualizarJoystick();
+  verificarLDR();
+
+  checkWiFi();   // Verifica a conexão WiFi
   mqttConnect(); // Conecta ao MQTT se não estiver conectado
   client.loop(); // Mantém o loop do cliente MQTT ativo
-  //* Parte do Boto
-  if (cards.Boto)
-  {
-    if (value.fragment < value.maxfragments) // Se a carta for Boto e moedas forem menores que 10
-    {
-      Serial.println("Carta Boto ativada! Você ganhou 3 moedas");
-      value.fragment += value.boto; // Adiciona o valor da carta Boto
-      delay(50);
-      amountFragments(); // Chama a função para mostrar a quantidade de fragmentos
-    }
-    if (value.fragment > value.maxfragments) // Garante que não ultrapasse o máximo
-    {
-      limitFragments();
-    }
 
-    cards.Boto = false; // Reseta o estado da carta Boto
-  }
-  //* Parte do Saci
-  if (cards.Saci)
-  {
-    if (value.fragment >= 3)
-    {
-      value.fragment += value.saci; // Subtrai o valor da carta Saci
-
-      // todo : Adicionar funcao para eliminar uma carta do jogo
-
-      Serial.println("Carta Saci ativada! Você gastou 3 fragmentos para eliminar uma carta.");
-      Serial.print("Quantidade de fragmentos: ");
-      Serial.println(value.fragment);
-    }
-    else
-    {
-      Serial.println("Você não tem fragmentos suficientes para usar a carta Saci.");
-      Serial.print("Quantidade de fragmentos: ");
-      Serial.println(value.fragment);
-    }
-    cards.Saci = false; // Reseta o estado da carta Saci
-  }
 
   //* Parte da Draw(Compra de cartas)
 
@@ -126,81 +452,244 @@ void loop()
   {
     Serial.println("Você ja comprou um fragmento.");
     Serial.print("Quantidade de fragmentos: ");
-    Serial.println(value.fragment);
+    Serial.println(value.Moedas);
   }
-  // if (player.endturn) // Se o turno terminar
-  // {
-  //   player.draw = true; // Reseta o estado da compra
-  //   Serial.println("Turno encerrado. Pronto para o próximo jogador.");
-  // }
+
 
   //* Parte do Ritual do Esquecimento (Golpe de Estado)
 
-  if (value.fragment >= 7 && player.ritual == true) // Se tiver pelo menos 7 fragmentos
+  if (value.Moedas >= 7 && player.ritual == true) // Se tiver pelo menos 7 fragmentos
   {
     // colocar opcao de iniciar o ritual no (provavelmente um botao) LCD
-    value.fragment -= 7;   // Gasta 7 fragmentos
+    value.Moedas -= 7;     // Gasta 7 fragmentos
     player.ritual = false; // Reseta o estado do ritual
     Serial.println("Ritual do Esquecimento ativado! Você eliminou uma carta do jogo.");
     Serial.print("Quantidade de fragmentos restantes: ");
-    Serial.println(value.fragment);
+    Serial.println(value.Moedas);
 
     // Mandar mensagem para o dealer resetando as cartas do jogador afetado pelo ritual
   }
+}
+void Iara()
+{
 
-  //* Parte do Curupira
-
-  if (cards.Curupira)
+if (obterDescricaoAcao(3) == "BLOQUEIO") 
   {
-    if (value.fragment >= 2) // Se a carta for Curupira e moedas forem maiores que 2
+    cards.Iara = true; 
+    client.publish("senai134/Diller/Jogador1/esp_publicando", "Bloqueio");
+
+    cards.Iara = false; 
+  }
+  
+    exibirItemMenu();
+
+}
+
+void Saci()
+{
+
+  if (obterDescricaoAcao(2) == "ROUBAR 2 MOEDAS")
+  {
+
+    cards.Saci = true; 
+    client.publish("senai134/Diller/Jogador1/esp_publicando", "Roubar 2 Moedas");
+    //Todo: Adicionar o sensor vl53L0X para verificar a proximidade do jogador e roubar as moedas
+    
+      if (cards.Saci && vl53l0x)
+      {
+        value.Moedas += value.saci; 
+      }
+
+      cards.Saci = false; 
+  }
+
+  exibirItemMenu();
+
+}
+
+
+void Curupira()
+{
+
+  if(obterDescricaoAcao(4) == "ELIMINAR CARTA") 
+  {
+    cards.Curupira = true; 
+    client.publish("senai134/Diller/Jogador1/esp_publicando", "Eliminar carta");
+
+  if (cards.Curupira && value.Moedas >= 2) // Se a carta for Curupira e moedas forem maiores que 2
     {
-      value.fragment += value.curupira; // Subtrai o valor da carta Curupira
-      Serial.println("Carta Curupira ativada! Você perdeu 2 fragmentos.");
-      amountFragments(); // Chama a função para mostrar a quantidade de fragmentos
+      value.Moedas += value.curupira; // Subtrai o valor da carta Curupira  
+    }
+  }
+  cards.Curupira = false; // Reseta o estado da carta Curupira
+  exibirItemMenu();
+}
+
+void Ritual()
+{
+  if (obterDescricaoAcao(1) == "RITUAL") 
+  {
+    player.ritual = true; 
+    client.publish("senai134/Diller/Jogador1/esp_publicando", "Ritual do Esquecimento");
+  }
+
+  if (player.ritual)
+  {
+    if (value.Moedas >= 7) // Se tiver pelo menos 7 fragmentos
+    {
+      value.Moedas -= 7;     // Gasta 7 fragmentos
+      player.ritual = false; // Reseta o estado do ritual
+
+      client.publish(mqtt_topic_pubs[i].c_str(), "eliminar")  
+
+      // Mandar mensagem para o dealer resetando as cartas do jogador afetado pelo ritual
     }
     else
     {
-      Serial.println("Você não tem fragmentos suficientes para usar a carta Curupira.");
-      amountFragments(); // Chama a função para mostrar a quantidade de fragmentos
+      Serial.println("Fragmentos insuficientes para realizar o ritual.");
     }
-    cards.Curupira = false; // Reseta o estado da carta Curupira
   }
+  
 
-  delay(2000);
 }
 
-void limitFragments()
+void atualizarBotoes()
 {
-  if (value.fragment > value.maxfragments) // Garante que não ultrapasse o máximo
+  btnSelecionar.update();
+  btnVoltar.update();
+  btnC.update();
+  btnD.update();
+
+  if (btnSelecionar.fell())
   {
-    value.fragment = value.maxfragments; // Reseta as moedas para 10 se exceder o limite
-    Serial.println("Você atingiu o máximo de fragmentos. Use o Ritual do Esquecimento para eliminar uma carta.");
+    if (!emMenu && cartasRecebidas && carta1 != -1 && carta2 != -1)
+    {
+      emMenu = true;
+      indiceMenu = 0;
+      exibirItemMenu();
+      return;
+    }
+
+    if (emMenu)
+    {
+      lcd.clear();
+      lcd.setCursor(0, 1);
+      lcd.print("ACAO SELECIONADA:");
+      lcd.setCursor(0, 2);
+      lcd.print(obterDescricaoAcao(indiceMenu + 1));
+      delay(3000);
+      exibirItemMenu();
+    }
+  }
+
+  if (btnVoltar.fell() && emMenu)
+  {
+    lcd.clear();
+    lcd.print("Saindo do menu.");
+    delay(1500);
+    lcd.clear();
+    lcd.print("Pressione A p/menu");
+    emMenu = false;
   }
 }
 
-void amountFragments()
+// === Atualizar joystick para navegar menu ===
+void atualizarJoystick()
 {
-  Serial.print("Quantidade de fragmentos: ");
-  Serial.println(value.fragment); // Mostra a quantidade de moedas após a compra
+  if (!emMenu)
+  {
+    return;
+
+    int y = analogRead(joystickYPin) - 4000;
+    int x = analogRead(joystickXPin) - 4000;
+    int dirX = 0;
+    int dirY = 0;
+
+    if (abs(y) > deadzone)
+      dirY = (y > 0) ? 1 : -1;
+    if (abs(x) > deadzone)
+      dirX = (x > 0) ? 1 : -1;
+
+    unsigned long agora = millis();
+    if (agora - ultimaLeituraJoystick < debounceJoystick)
+      return;
+
+    if (dirY != 0 && dirY != UltimaDirecaoY)
+    {
+      if (dirY == 1)
+      {
+        indiceMenu = (indiceMenu - 1 + totalAcoes) % totalAcoes;
+        exibirItemMenu();
+      }
+      else if (dirY == -1)
+      {
+        indiceMenu = (indiceMenu + 1) % totalAcoes;
+        exibirItemMenu();
+      }
+      ultimaLeituraJoystick = agora;
+      UltimaDirecaoY = dirY;
+    }
+    else if (dirY == 0)
+    {
+      // Libera o joystick: permite nova navegação depois
+      UltimaDirecaoY = 0;
+    }
+
+    if (dirX != UltimaDirecaoX)
+    {
+      if (dirX == 1)
+        Serial.println("Joystick para direita");
+      else if (dirX == -1)
+        Serial.println("Joystick para esquerda");
+      UltimaDirecaoX = dirX;
+    }
+  }
+}
+
+// === Verificar sensor LDR para diminuir moedas ===
+void verificarLDR()
+{
+  int leituraLDR = analogRead(pinoLDR);
+  //Serial.println(leituraLDR);
+  unsigned long agora = millis();
+
+  if (btnC.fell())
+  {
+    if (leituraLDR > 2000 && agora - ultimaAtualizacaoMoeda > intervaloMoeda)
+    {
+      moedas = max(0, moedas - 1);
+      lcd.setCursor(0, 3);
+      lcd.print("Perdeu 1 moeda! ");
+      exibirItemMenu();
+      ultimaAtualizacaoMoeda = agora;
+    }
+  }
+}
+
+void limitMoedas()
+{
+  if (value.Moedas > value.maxMoedas) // Garante que não ultrapasse o máximo
+  {
+    value.Moedas = value.maxMoedas; // Reseta as moedas para 10 se exceder o limite
+  }
 }
 
 void drawPhase()
 {
-
-  value.fragment += 1; // Adiciona 1 fragmento ao total
-  Serial.println("Você coletou um Fragmento do Elo");
-  Serial.print("Quantidade de fragmentos restantes: ");
-  if (value.fragment > 10)
+  if(player.draw)
   {
-    limitFragments(); // Chama a função para limitar os fragmentos
+  value.Moedas += 1; // Adiciona 1 fragmento ao total
+   if (value.Moedas > 10)
+     {
+      limitMoedas(); // Chama a função para limitar os fragmentos
+     }
   }
-
   player.draw = false;
 }
 
 void callback(char *topic, byte *payload, unsigned int length)
 {
-  //Serial.printf("Mensagem recebida em %s: ", topic);
+  
 
   String mensagem = "";
   for (unsigned int i = 0; i < length; i++)
@@ -211,29 +700,6 @@ void callback(char *topic, byte *payload, unsigned int length)
 
   mensagem.trim();
   mensagem.toLowerCase();
-
-  //Serial.println(mensagem);
-
-  if (mensagem == "boto")
-  {
-    cards.Boto = true; // Ativa a carta Boto
-    //Serial.println("Carta Boto ativada!");
-  }
-  else if (mensagem == "saci")
-  {
-    cards.Saci = true; // Ativa a carta Saci
-    //Serial.println("Carta Saci ativada!");
-  }
-  else if (mensagem == "curupira")
-  {
-    cards.Curupira = true; // Ativa a carta Curupira
-    //Serial.println("Carta Curupira ativada!");
-  }
-  else if (mensagem == "ritual")
-  {
-    player.ritual = true; // Ativa o ritual do esquecimento
-    //Serial.println("Ritual do Esquecimento ativado!");
-  }
 }
 void mqttConnect()
 {
@@ -255,21 +721,3 @@ void mqttConnect()
     }
   }
 }
-
-
-
-
-//! Comentado pois provavelmente ira para o diller
-
-/* Parte do Diller (não implementada)
-if (player.endturn) // Se o turno terminar
-  {
-    player.draw = true; // Reseta o estado da compra
-    Serial.println("Turno encerrado. Pronto para o próximo jogador.");
-  }
-  if (fragment==maxfragments) // Se tiver 10 fragmentos e o ritual não estiver ativo
-  {
-    Serial.println("Você atingiu o máximo de fragmentos.o Ritual do Esquecimento sera ativado para eliminar uma carta.");
-    player.ritual = true; // Ativa o ritual
-  }
-  */
